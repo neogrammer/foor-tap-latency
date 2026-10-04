@@ -143,7 +143,6 @@ event,xr_time_ns,block,latency_ms,index,source_time_ns
   The CSV header records this as `clock_exact=0`.
 - Sessions must run on the headset's own speakers. A Bluetooth headset adds 100 ms or more,
   which is larger than four of the five conditions.
-- Taps are paired with the nearest beat inside half a beat with no check for doubles.
 - The condition order rotates, which balances position but not carryover. A Williams design
   is the correct structure and is in the beta plan.
 - NASA-TLX and the end-of-session preference ranking are not built yet.
