@@ -8,11 +8,26 @@ Milestone 3, alpha release.
 
 ---
 
+## Layout
+
+```
+Chapter2/            the Quest app, an Android Studio project
+Common/              shared scaffold from the Khronos OpenXR tutorial
+Shaders/             shader sources, used by the scaffold
+cmake/               build helpers, used by the scaffold
+analysis.html        the analysis and charting page, open it in a browser
+data/                a real recorded session, for loading into the page
+sample_session.csv   synthetic data, for checking the charts without a headset
+```
+
+`Chapter2`, `Common`, `Shaders` and `cmake` all come from the Khronos tutorial and all four
+are needed for the build. My own work is the nine files listed further down.
+
 ## What this is
 
 Two programs with a file between them.
 
-**`quest/`** is the headset app. Native OpenXR and C++ on a Meta Quest 3, built on the
+**`Chapter2/`** is the headset app. Native OpenXR and C++ on a Meta Quest 3, built on the
 Khronos OpenXR tutorial project with Vulkan. A controller lies flat on the floor and the
 participant taps it with their foot. A metronome beeps and a light pulses with it. The app
 then waits a set amount of time before flashing a pad on the floor to confirm the tap. That
@@ -41,11 +56,15 @@ No build step and no dependencies.
 
 1. Download `analysis.html`.
 2. Open it in any desktop browser (double-click it, or drag it into a browser window).
-3. Either load a `taps_*.csv` pulled from the headset, or click **Start session** to run the
-   experiment on the keyboard instead.
+3. Click **Load CSV** and pick `data/session_P01.csv`. That is a real recorded session from
+   the headset, so the charts that come up are the actual result.
 
-`sample_session.csv` is a synthetic file for checking the charts without a headset. Load that
-first if you just want to see what the output looks like.
+You can also click **Start session** to run the whole experiment on the keyboard, or load
+`sample_session.csv`, which is synthetic and exists only for checking the chart code.
+
+A banner appears above the results if the session ran on the fallback timing path. The
+included session shows one, because the clock conversion extension did not load on my
+headset. The limitations section at the bottom explains what that costs.
 
 ---
 
@@ -53,17 +72,33 @@ first if you just want to see what the output looks like.
 
 You need Android Studio, the Android NDK, and a Meta Quest 3 in developer mode.
 
-1. Clone the Khronos OpenXR tutorial and open its `Chapter2` project in Android Studio:
-   `https://github.com/KhronosGroup/OpenXR-Tutorials`
-2. Copy every file from `quest/` in this repository into `app/src/main/cpp/`, overwriting
-   the existing `main.cpp`.
-3. In `app/src/main/cpp/CMakeLists.txt`, add `aaudio` to `target_link_libraries`.
-4. In `app/build.gradle`, set `minSdkVersion 26`. AAudio needs it, and the Quest 3 is well
-   past it.
-5. Build and run on the headset.
+1. Clone or download this repository.
+2. In Android Studio, **Open** the `Chapter2` folder.
+3. Let it sync. It will fetch the OpenXR loader and the Gradle wrapper on its own.
+4. Plug in the headset and run.
 
-`quest/INTEGRATION.md` has the full file-by-file walkthrough, including what each header does
-and which edits in `main.cpp` they depend on. If the build fails, start there.
+If the NDK is missing, Android Studio will say so and offer to install it. Accept.
+
+### What is mine and what is not
+
+The project is built on the Khronos OpenXR tutorial
+(https://github.com/KhronosGroup/OpenXR-Tutorials), which supplies the Vulkan setup, the
+session and swapchain handling, and the Android glue. The experiment is mine, and it lives
+in these files under `Chapter2/app/src/main/cpp/`:
+
+| File | What it does |
+|---|---|
+| `TapExperiment.h` | The whole study: block order, lead-in, countdown, five lag conditions, ratings |
+| `TapLogger.h` | CSV event log, one row per beat, tap, confirmation, rating and block boundary |
+| `AudioEngine.h` | AAudio stream, click scheduling pinned to exact audio samples |
+| `XrClock.h` | Converts between the audio clock and the runtime clock |
+| `XRInput.h` | Action set and bindings, and the subaction-path split between the floor controller and the held one |
+| `HandTracking.h` | Hand joints and the aim ray |
+| `HandPointer.h` | Point-and-hold selection, plus the panel button layout |
+| `TextRenderer.h` | Stroke font. Letters built from thin rotated cuboids |
+| `main.cpp` | The tutorial file, heavily modified. The scene drawing and the per-frame loop are mine |
+
+`INTEGRATION.md` documents every change to `main.cpp` and what each header depends on.
 
 ### Running a session
 
@@ -87,8 +122,7 @@ The CSV is written when the session finishes and again on exit.
 adb pull /sdcard/Android/data/com.example.vulkanxray/files/taps_P01.csv
 ```
 
-Replace the package name if you changed it. The participant number in the filename comes from
-the number set in `TapExperiment.h`, which also sets the condition order.
+The participant number in the filename comes from the number set in `TapExperiment.h`, which also sets the condition order.
 
 ---
 
