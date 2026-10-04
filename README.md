@@ -138,11 +138,6 @@ event,xr_time_ns,block,latency_ms,index,source_time_ns
 
 ## Known limitations
 
-- Taps in the recorded sessions land about 175 ms before the beat on average, where the
-  tapping literature reports 20 to 80 ms early. Most of that looks like a fixed offset,
-  probably audio output delay the system does not report. A fixed offset moves every
-  condition equally, so comparisons between conditions still hold, but the average on its own
-  is not comparable to published figures until it is measured against outside hardware.
 - `XR_KHR_convert_timespec_time` did not load on the test headset, so the audio clock and the
   runtime clock are tied together by an estimate that probably logs beats 15 to 30 ms late.
   The CSV header records this as `clock_exact=0`.
