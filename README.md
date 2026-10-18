@@ -4,7 +4,9 @@ How much input lag can foot tapping tolerate in VR before timing performance fal
 and before the user notices?
 
 Justin Hardee. CSCI-7420 Human-Computer Interaction, Fall 2026, Augusta University.
-Milestone 3, alpha release.
+Milestone 4, beta release.
+
+Live analysis page: https://neogrammer.github.io/foor-tap-latency/analysis.html
 
 ---
 
@@ -15,9 +17,11 @@ Chapter2/            the Quest app, an Android Studio project
 Common/              shared scaffold from the Khronos OpenXR tutorial
 Shaders/             shader sources, used by the scaffold
 cmake/               build helpers, used by the scaffold
+app-debug.apk        a prebuilt APK, for sideloading without building
 analysis.html        the analysis and charting page, open it in a browser
-data/                a real recorded session, for loading into the page
+data/                the two recorded sessions, for loading into the page
 sample_session.csv   synthetic data, for checking the charts without a headset
+INTEGRATION.md       every change made to the tutorial's main.cpp
 ```
 
 `Chapter2`, `Common`, `Shaders` and `cmake` all come from the Khronos tutorial and all four
@@ -38,6 +42,9 @@ Hand tracking runs at the same time as the controller, because the only controll
 floor under a foot. The menus are driven by pointing a finger and holding still for one
 second.
 
+After the five scored blocks the session collects NASA-TLX across six dimensions and a
+preference ranking of the five blocks.
+
 **`analysis.html`** reads the CSV and charts it. It pairs each tap with its nearest beat,
 works out how consistent the tapping was, and plots that against lag alongside the
 participant's own responsiveness ratings. It also runs the whole experiment from the keyboard
@@ -56,11 +63,18 @@ No build step and no dependencies.
 
 1. Download `analysis.html`.
 2. Open it in any desktop browser (double-click it, or drag it into a browser window).
-3. Click **Load CSV** and pick `data/session_P01.csv`. That is a real recorded session from
-   the headset, so the charts that come up are the actual result.
+3. Click **Choose Files** and pick **both** files in `data/`. Those are the two real
+   recorded sessions, so the charts that come up are the actual result, with one line
+   per participant on shared axes.
 
 You can also click **Start session** to run the whole experiment on the keyboard, or load
 `sample_session.csv`, which is synthetic and exists only for checking the chart code.
+
+The page pairs each tap with at most one beat, derives the latency actually delivered from
+the logged feedback events, fits the bend in each curve, and shows the NASA-TLX and ranking
+results. The fitted bend is only drawn when it is clearly better than the next candidate
+breakpoint; with five conditions it often is not, and the page says so rather than naming a
+threshold the data cannot support.
 
 A banner appears above the results if the session ran on the fallback timing path. The
 included session shows one, because the clock conversion extension did not load on my
@@ -70,7 +84,15 @@ headset. The limitations section at the bottom explains what that costs.
 
 ## Setup: the Quest app
 
-You need Android Studio, the Android NDK, and a Meta Quest 3 in developer mode.
+If you only want to run it, `app-debug.apk` at the top of the repository is a prebuilt
+build. Put the Quest in developer mode and sideload it:
+
+```
+adb install app-debug.apk
+```
+
+To build it yourself you need Android Studio, the Android NDK, and a Meta Quest 3 in
+developer mode.
 
 1. Clone or download this repository.
 2. In Android Studio, **Open** the `Chapter2` folder.
@@ -107,12 +129,18 @@ tracking, audio. Put a controller flat on the floor, step on it, and watch the l
 answers the one question the whole design rests on, which is whether a controller the runtime
 no longer considers held still reports button presses. It does.
 
+**Set the participant on that same screen.** Hold a finger on a number from 1 to 7 and the
+header changes to match. The number also picks the row of the Latin square, so P01 and P02
+get different condition orders. One build runs everybody; nothing needs editing between
+sessions.
+
 Point a finger at the **GO** button and hold still for a second to advance. Every screen that
 waits for you has GO in the same corner.
 
-Then: practice block at zero lag, then five scored blocks, with a 1 to 7 responsiveness
-rating after each one. Tap in time with the beat. Ignore what the floor pad does, since that
-is the lag being tested.
+The session then runs: practice block at zero lag, five scored blocks of 60 taps with a 1 to
+7 responsiveness rating after each, six NASA-TLX screens, and a ranking of the five blocks
+from most to least responsive. About 25 minutes. Tap in time with the beat and ignore what
+the floor pad does, since that is the lag being tested.
 
 ### Getting the data off
 
@@ -122,7 +150,8 @@ The CSV is written when the session finishes and again on exit.
 adb pull /sdcard/Android/data/com.example.vulkanxray/files/taps_P01.csv
 ```
 
-The participant number in the filename comes from the number set in `TapExperiment.h`, which also sets the condition order.
+Replace the package name if you changed it. The participant number in the filename comes from
+the number set in `TapExperiment.h`, which also sets the condition order.
 
 ---
 
@@ -166,20 +195,41 @@ One header line, then one row per event.
 event,xr_time_ns,block,latency_ms,index,source_time_ns
 ```
 
-`event` is one of `beat`, `tap`, `feedback`, `rating`, `block_start`, `block_end`.
+`event` is one of `beat`, `tap`, `feedback`, `rating`, `block_start`, `block_end`, `tlx`,
+`rank`.
+
+Most rows use `block` for the block number and `index` for the beat number or rating value.
+The two questionnaire rows reuse those columns differently:
+
+| event | `block` | `index` |
+|---|---|---|
+| `tlx` | dimension, 0 to 5 in the order mental, physical, temporal, performance, effort, frustration | the 1 to 7 answer |
+| `rank` | place, 1 being most responsive | the block number chosen |
 
 ---
 
 ## Known limitations
 
+- Taps in the recorded sessions land about 175 ms before the beat on average, where the
+  tapping literature reports 20 to 80 ms early. Most of that looks like a fixed offset,
+  probably audio output delay the system does not report. A fixed offset moves every
+  condition equally, so comparisons between conditions still hold, but the average on its own
+  is not comparable to published figures until it is measured against outside hardware.
 - `XR_KHR_convert_timespec_time` did not load on the test headset, so the audio clock and the
   runtime clock are tied together by an estimate that probably logs beats 15 to 30 ms late.
   The CSV header records this as `clock_exact=0`.
 - Sessions must run on the headset's own speakers. A Bluetooth headset adds 100 ms or more,
   which is larger than four of the five conditions.
+- **The pipeline cannot deliver a response faster than about 63 ms.** This is the audio
+  stream's own floor, measured rather than assumed: the scheduler reports the frame it
+  actually used, and at 0 ms and 50 ms that comes back as roughly 63 ms both times. The two
+  shortest conditions are therefore the same stimulus, and the five nominal conditions are
+  four distinguishable levels. Respacing them above the floor is the next change to make.
 - The condition order rotates, which balances position but not carryover. A Williams design
-  is the correct structure and is in the beta plan.
-- NASA-TLX and the end-of-session preference ranking are not built yet.
+  is the correct structure.
+- NASA-TLX is a 7-point unweighted scale rather than the published 21-point weighted
+  instrument, because the renderer draws letters out of boxes. Performance keeps the original
+  direction, good to poor, so it is reverse scored against the other five.
 
 The full list is in the alpha release report.
 

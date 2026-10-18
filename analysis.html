@@ -61,6 +61,10 @@ input,select{font-family:var(--font-mono);font-size:14px;padding:8px 10px;
   border-radius:4px;width:100%;min-width:0}
 input:focus-visible,select:focus-visible,button:focus-visible{
   outline:2px solid var(--accent);outline-offset:2px}
+/* The hidden attribute sets display:none, but a class rule carrying
+   display:flex outranks it, so sections stayed on screen after a session was
+   loaded and left an empty panel behind the results. */
+[hidden]{display:none !important}
 
 /* --- buttons --- */
 button{font-family:var(--font-ui);font-size:14px;font-weight:500;cursor:pointer;
@@ -173,7 +177,7 @@ ul{margin:0;padding-left:18px;color:var(--ink-2);display:flex;flex-direction:col
       <button id="skipprac">Skip practice</button>
       <label style="flex-direction:row;align-items:center;gap:8px">
         <span class="lbl" style="font-size:10.5px">Load session or Quest CSV</span>
-        <input type="file" id="load" accept=".json,.csv,application/json,text/csv" style="width:auto;font-size:11px;padding:5px">
+        <input type="file" id="load" multiple accept=".json,.csv,application/json,text/csv" style="width:auto;font-size:11px;padding:5px">
       </label>
     </div>
   </section>
@@ -275,6 +279,95 @@ function sd(a){
   for (i=0;i<a.length;i++) s += (a[i]-m)*(a[i]-m);
   return Math.sqrt(s/(a.length-1));
 }
+// ---------------------------------------------------------------------------
+// Pair each tap with at most one beat, and each beat with at most one tap.
+//
+// The alpha took the nearest beat for every tap independently, so two taps close
+// together could both claim the same beat and the same beat could be counted hit
+// twice. Here every (tap, beat) pair inside the window is scored by distance,
+// sorted, and consumed greedily: the closest pair is locked in first, and both
+// members are then unavailable. Taps with no beat left over are dropped and
+// counted, because an extra tap is a real behaviour worth reporting rather than
+// something to quietly fold into the nearest beat.
+// ---------------------------------------------------------------------------
+function pairTapsToBeats(taps, beats, windowMs, scale){
+  var sc = scale || 1;
+  var cand = [], i, j;
+  for (i = 0; i < taps.length; i++){
+    for (j = 0; j < beats.length; j++){
+      var d = (taps[i] - beats[j]) / sc;
+      if (Math.abs(d) <= windowMs) cand.push({ t:i, b:j, d:d, ad:Math.abs(d) });
+    }
+  }
+  cand.sort(function(x,y){ return x.ad - y.ad; });
+  var tUsed = {}, bUsed = {}, pairs = [];
+  for (i = 0; i < cand.length; i++){
+    var c = cand[i];
+    if (tUsed[c.t] || bUsed[c.b]) continue;
+    tUsed[c.t] = bUsed[c.b] = true;
+    pairs.push(c);
+  }
+  pairs.sort(function(x,y){ return x.b - y.b; });
+  return {
+    pairs: pairs,
+    unmatchedTaps: taps.length - pairs.length,
+    matchedBeats: pairs.length
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Where does the curve bend?
+//
+// Fits flat-then-sloping: everything up to the breakpoint is described by one
+// mean, everything from it by a least-squares line, and the breakpoint with the
+// lowest total squared error wins. Candidates whose second segment slopes the
+// wrong way are rejected, so a flat run of noise does not get read as a bend.
+//
+// With five conditions this is indicative and nothing more. The per-candidate
+// errors are returned alongside the winner so it is visible how much better the
+// best fit really is, which is the honest way to show a weakly determined
+// estimate.
+// ---------------------------------------------------------------------------
+function fitThreshold(xs, ys, wantRising){
+  var pts = [], i;
+  for (i = 0; i < xs.length; i++)
+    if (isFinite(ys[i])) pts.push({ x: xs[i], y: ys[i] });
+  if (pts.length < 4) return null;
+
+  var best = null, table = [];
+  for (var k = 1; k <= pts.length - 2; k++){
+    var flat = pts.slice(0, k + 1), rise = pts.slice(k);
+    var m = 0; for (i=0;i<flat.length;i++) m += flat[i].y; m /= flat.length;
+    var sse = 0; for (i=0;i<flat.length;i++) sse += (flat[i].y-m)*(flat[i].y-m);
+
+    var sx=0, sy=0, sxx=0, sxy=0, nn=rise.length;
+    for (i=0;i<nn;i++){ sx+=rise[i].x; sy+=rise[i].y; sxx+=rise[i].x*rise[i].x; sxy+=rise[i].x*rise[i].y; }
+    var den = nn*sxx - sx*sx;
+    if (Math.abs(den) < 1e-9) continue;
+    var slope = (nn*sxy - sx*sy)/den, icept = (sy - slope*sx)/nn;
+    for (i=0;i<nn;i++){ var r = rise[i].y - (slope*rise[i].x + icept); sse += r*r; }
+
+    var ok = wantRising ? (slope > 0) : (slope < 0);
+    table.push({ at: pts[k].x, sse: sse, slope: slope, ok: ok });
+    if (ok && (!best || sse < best.sse))
+      best = { at: pts[k].x, sse: sse, slope: slope, index: k };
+  }
+  if (!best) return null;
+  best.table = table;
+
+  // How much better is the winner than the next plausible breakpoint? On five
+  // points a wandering line will always produce SOME minimum, so the page has
+  // to be able to say "a bend is not separable here" rather than name a number
+  // the data cannot support. Twice the error is the bar used.
+  var others = table.filter(function(r){ return r.ok && r.at !== best.at; })
+                    .map(function(r){ return r.sse; });
+  var runnerUp = others.length ? Math.min.apply(null, others) : Infinity;
+  best.margin    = (best.sse > 1e-9) ? runnerUp / best.sse : Infinity;
+  best.confident = (best.margin >= 2);
+  best.runnerUp  = runnerUp;
+  return best;
+}
+
 function blockStats(rec){
   var asy = rec.taps.map(function(t){ return t.asynchrony; });
   var hitBeats = 0, i;
@@ -530,11 +623,21 @@ function buildSession(){
 }
 
 // --- chart helper: ordinal x, linear y, drawn to scale ---
+// Draws one series or several on shared axes, and can mark a fitted breakpoint.
+// Several series is how two participants get compared without averaging them
+// into a single curve that describes neither of them.
 function lineChart(opts){
   var W=640, H=250, L=56, R=18, T=18, B=44;
   var pw = W-L-R, ph = H-T-B;
-  var vals = opts.values;
-  var finite = vals.filter(function(v){ return isFinite(v); });
+
+  var series = opts.series || [{ values: opts.values, color: opts.color, label: opts.label || "" }];
+  var multi  = series.length > 1;
+  var vals   = series[0].values;
+
+  var finite = [], si, vi;
+  for (si=0; si<series.length; si++)
+    for (vi=0; vi<series[si].values.length; vi++)
+      if (isFinite(series[si].values[vi])) finite.push(series[si].values[vi]);
   if (!finite.length) finite = [0,1];
   var lo = opts.min !== undefined ? opts.min : Math.min.apply(null, finite);
   var hi = opts.max !== undefined ? opts.max : Math.max.apply(null, finite);
@@ -547,6 +650,19 @@ function lineChart(opts){
   var y = function(v){ return T + ph - ((v-lo)/(hi-lo))*ph; };
 
   var s = '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+opts.aria+'">';
+
+  // Fitted breakpoint, drawn only when the fit is actually separable. No mark
+  // is better than a line implying a precision the data does not support.
+  if (opts.threshold && opts.threshold.confident){
+    var ti = opts.labels.indexOf(String(opts.threshold.at));
+    if (ti >= 0){
+      var tx = L + (opts.labels.length<2 ? pw/2 : (pw * ti/(opts.labels.length-1)));
+      s += '<line x1="'+tx.toFixed(1)+'" y1="'+T+'" x2="'+tx.toFixed(1)+'" y2="'+(T+ph)+
+           '" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="5 4" fill="none"/>';
+      s += '<text x="'+(tx+6).toFixed(1)+'" y="'+(T+12)+'" fill="var(--warn)" '+
+           'font-family="var(--font-mono)" font-size="10.5">BEND</text>';
+    }
+  }
   // y grid + ticks
   var steps = 4, i;
   for (i=0;i<=steps;i++){
@@ -568,27 +684,119 @@ function lineChart(opts){
     s += '<line x1="'+L+'" y1="'+y(0).toFixed(1)+'" x2="'+(W-R)+'" y2="'+y(0).toFixed(1)+
          '" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3" fill="none"/>';
   }
-  // path
-  var d = "", drew = 0;
-  for (i=0;i<vals.length;i++){
-    if (!isFinite(vals[i])) continue;
-    d += (drew===0 ? "M" : "L") + x(i).toFixed(1) + " " + y(vals[i]).toFixed(1) + " ";
-    drew++;
-  }
-  if (drew>1) s += '<path d="'+d.trim()+'" fill="none" stroke="'+opts.color+'" stroke-width="2" '+
-                   'stroke-linejoin="round" stroke-linecap="round"/>';
-  // markers + direct labels
-  for (i=0;i<vals.length;i++){
-    if (!isFinite(vals[i])) continue;
-    s += '<circle cx="'+x(i).toFixed(1)+'" cy="'+y(vals[i]).toFixed(1)+'" r="5" fill="'+opts.color+
-         '" stroke="var(--surface)" stroke-width="2"/>';
-    var ly = y(vals[i]) - 13;
-    if (ly < T+10) ly = y(vals[i]) + 20;
-    s += '<text x="'+x(i).toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" fill="var(--ink-2)" '+
-         'font-family="var(--font-mono)" font-size="11" font-weight="500">'+opts.fmt(vals[i])+'</text>';
+  // one path per series
+  for (si=0; si<series.length; si++){
+    var sv = series[si].values, col = series[si].color;
+    var d = "", drew = 0;
+    for (i=0;i<sv.length;i++){
+      if (!isFinite(sv[i])) continue;
+      d += (drew===0 ? "M" : "L") + x(i).toFixed(1) + " " + y(sv[i]).toFixed(1) + " ";
+      drew++;
+    }
+    if (drew>1) s += '<path d="'+d.trim()+'" fill="none" stroke="'+col+'" stroke-width="2" '+
+                     'stroke-linejoin="round" stroke-linecap="round"/>';
+    for (i=0;i<sv.length;i++){
+      if (!isFinite(sv[i])) continue;
+      s += '<circle cx="'+x(i).toFixed(1)+'" cy="'+y(sv[i]).toFixed(1)+'" r="'+(multi?4:5)+'" fill="'+col+
+           '" stroke="var(--surface)" stroke-width="2"/>';
+      // Point labels on a single series only. With two they collide and the
+      // reader loses the shape, which is the whole reason for the chart.
+      if (!multi){
+        var ly = y(sv[i]) - 13;
+        if (ly < T+10) ly = y(sv[i]) + 20;
+        s += '<text x="'+x(i).toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" fill="var(--ink-2)" '+
+             'font-family="var(--font-mono)" font-size="11" font-weight="500">'+opts.fmt(sv[i])+'</text>';
+      }
+    }
   }
   s += '</svg>';
   return s;
+}
+
+// Every session loaded this sitting, so two participants can be drawn together
+// instead of being averaged into one curve that describes neither.
+var LOADED = [];
+var PCOLORS = ["var(--s1)", "var(--s2)", "var(--good)", "var(--bad)"];
+
+var TLX_DIMS = ["Mental demand","Physical demand","Temporal demand",
+                "Performance","Effort","Frustration"];
+
+function tlxPanel(sess){
+  if (!sess.tlx || !sess.tlx.length) return "";
+  var html = '<section class="panel"><h2>Workload &middot; NASA-TLX</h2>' +
+    '<div class="tablewrap"><table><thead><tr><th>Dimension</th><th>Rating (1 to 7)</th>' +
+    '<th></th></tr></thead><tbody>';
+  sess.tlx.forEach(function(t){
+    var name = TLX_DIMS[t.dimension] || ("Dimension " + t.dimension);
+    var pct = Math.round(((t.value - 1) / 6) * 100);
+    html += '<tr><td>' + name + '</td><td>' + t.value + '</td>' +
+      '<td style="width:55%"><div style="height:10px;background:var(--line);border-radius:5px">' +
+      '<div style="height:10px;width:' + pct + '%;background:var(--s1);border-radius:5px"></div>' +
+      '</div></td></tr>';
+  });
+  html += '</tbody></table></div>' +
+    '<p class="note">Collected once at the end of the session, so this describes the ' +
+    'session as a whole rather than any single latency condition. Two deviations from the ' +
+    'published instrument, both forced by what the headset can draw: the scale is 7 points ' +
+    'rather than 21, and the dimensions are unweighted, so this supports comparison between ' +
+    'participants rather than a standard TLX score. <b>Performance keeps the original ' +
+    'direction</b>, good on the left and poor on the right, so it is reverse scored against ' +
+    'the other five.</p></section>';
+  return html;
+}
+
+function rankPanel(sess){
+  if (!sess.ranking || !sess.ranking.length) return "";
+  var html = '<section class="panel"><h2>Preference ranking</h2>' +
+    '<div class="tablewrap"><table><thead><tr><th>Place</th><th>Block</th>' +
+    '<th>Added latency</th></tr></thead><tbody>';
+  sess.ranking.forEach(function(r){
+    var lat = sess.conditionOrder[r.blockNumber - 1];
+    html += '<tr><td>' + r.place + (r.place === 1 ? " (most responsive)" : "") + '</td>' +
+      '<td>' + r.blockNumber + '</td>' +
+      '<td>' + (lat === undefined ? "&mdash;" : lat + " ms") + '</td></tr>';
+  });
+  html += '</tbody></table></div>' +
+    '<p class="note">Ranked by block number at the end of the session, then mapped back to ' +
+    'the latency each block ran at. The participant never saw a latency value, so this is a ' +
+    'preference between experiences rather than between numbers. Where this ordering ' +
+    'disagrees with the per-block ratings above, the disagreement is itself a finding: ' +
+    'remembered experience and in-the-moment judgement are not the same measure.</p></section>';
+  return html;
+}
+
+function overlayPanel(){
+  if (LOADED.length < 2) return "";
+  var labels = CONDITIONS.map(String);
+  function pick(sess, f){
+    var by = {}; sess.blocks.forEach(function(b){ by[b.latency] = b; });
+    return CONDITIONS.map(function(L){ return by[L] ? f(by[L]) : NaN; });
+  }
+  var sdSeries = LOADED.map(function(s2, i){
+    return { values: pick(s2, function(b){ return b.sdAsynchronyMs; }),
+             color: PCOLORS[i % PCOLORS.length], label: s2.participant };
+  });
+  var rtSeries = LOADED.map(function(s2, i){
+    return { values: pick(s2, function(b){ return b.rating || NaN; }),
+             color: PCOLORS[i % PCOLORS.length], label: s2.participant };
+  });
+  var legend = '<div class="legend">' + LOADED.map(function(s2, i){
+    return '<span><i class="swatch" style="background:' + PCOLORS[i % PCOLORS.length] +
+           '"></i>' + s2.participant + '</span>';
+  }).join("") + '</div>';
+
+  return '<section class="panel"><h2>All participants</h2>' +
+    '<figure>' + lineChart({ series: sdSeries, labels: labels,
+      aria: "Standard deviation of asynchrony by added latency, per participant",
+      fmt: function(v){ return v.toFixed(0); }, min: 0 }) +
+    '<figcaption><b>SD of asynchrony (ms), one line per participant.</b> Drawn separately ' +
+    'rather than averaged, because with this few people a mean would hide exactly the ' +
+    'individual differences the curves are there to show.</figcaption></figure>' +
+    '<figure>' + lineChart({ series: rtSeries, labels: labels,
+      aria: "Perceived responsiveness by added latency, per participant",
+      fmt: function(v){ return v.toFixed(1); }, min: 1, max: 7 }) +
+    '<figcaption><b>Perceived responsiveness (1 to 7), one line per participant.</b>' +
+    '</figcaption></figure>' + legend + '</section>';
 }
 
 function renderResults(sess){
@@ -599,6 +807,23 @@ function renderResults(sess){
   var rate = CONDITIONS.map(function(L){ return byLat[L] && byLat[L].rating ? byLat[L].rating : NaN; });
   var mn   = CONDITIONS.map(function(L){ return byLat[L] ? byLat[L].meanAsynchronyMs : NaN; });
   var hr   = CONDITIONS.map(function(L){ return byLat[L] ? byLat[L].hitRate*100 : NaN; });
+
+  var dlv  = CONDITIONS.map(function(L){ return byLat[L] ? byLat[L].deliveredLatencyMs : NaN; });
+
+  // Where each curve bends. Precision should rise with latency and the rating
+  // should fall, so each fit is told which direction counts as degradation; a
+  // bend the wrong way is noise, not a threshold.
+  var fitSD = fitThreshold(CONDITIONS, sdv,  true);
+  var fitRT = fitThreshold(CONDITIONS, rate, false);
+  function bendText(f, what){
+    if (!f) return ' No bend in ' + what + ' could be fitted: the curve does not flatten ' +
+                    'then turn in the expected direction.';
+    if (!f.confident) return ' A flat-then-turning fit is best at <b>' + f.at + ' ms</b>, but ' +
+                    'the next breakpoint fits almost as well, so with five conditions this one ' +
+                    'is not separable. Treat it as a direction to test, not a threshold.';
+    return ' Fitted breakpoint: <b>' + f.at + ' ms</b>, a markedly better fit than any other ' +
+           'breakpoint on this curve.';
+  }
 
   var base = byLat[0];
   var worst = sess.blocks.length ? sess.blocks.reduce(function(a,b){
@@ -633,12 +858,12 @@ function renderResults(sess){
     '<figure>' + lineChart({
       values: sdv, labels: labels, color: "var(--s1)",
       aria: "Standard deviation of asynchrony by added latency",
-      fmt: function(v){ return v.toFixed(0); }, min: 0
+      fmt: function(v){ return v.toFixed(0); }, min: 0, threshold: fitSD
     }) +
     '<figcaption><b>SD of asynchrony (ms).</b> How consistently taps landed relative to the beat. ' +
       'Lower is steadier. The point where this bends upward is the performance threshold.' +
       (isFinite(delta) ? ' Spread grew by <b>' + delta.toFixed(0) + ' ms</b> from 0 ms to ' +
-        worst.latency + ' ms.' : '') +
+        worst.latency + ' ms.' : '') + bendText(fitSD, 'timing precision') +
     '</figcaption></figure></section>';
 
   // chart 2
@@ -646,11 +871,18 @@ function renderResults(sess){
     '<figure>' + lineChart({
       values: rate, labels: labels, color: "var(--s2)",
       aria: "Perceived responsiveness rating by added latency",
-      fmt: function(v){ return v.toFixed(1); }, min: 1, max: 7
+      fmt: function(v){ return v.toFixed(1); }, min: 1, max: 7, threshold: fitRT
     }) +
     '<figcaption><b>Self-reported responsiveness (1 to 7).</b> Collected immediately after each block. ' +
       'The point where this falls is the perception threshold. The gap between this bend and the one ' +
-      'above is RQ3.</figcaption></figure>' +
+      'above is RQ3.' + bendText(fitRT, 'perceived responsiveness') +
+      ((fitSD && fitRT && fitSD.confident && fitRT.confident)
+        ? ' <b>RQ3: the two bends are ' + Math.abs(fitSD.at - fitRT.at) + ' ms apart</b>' +
+          (fitRT.at < fitSD.at
+            ? ', with lag noticed before performance suffered.'
+            : ', with performance suffering before lag was noticed.')
+        : '') +
+      '</figcaption></figure>' +
     '<div class="legend">' +
       '<span><i class="swatch" style="background:var(--s1)"></i>Timing precision</span>' +
       '<span><i class="swatch" style="background:var(--s2)"></i>Perceived responsiveness</span>' +
@@ -658,21 +890,37 @@ function renderResults(sess){
 
   // table
   html += '<section class="panel"><h2>Per-block results</h2><div class="tablewrap"><table>' +
-    '<thead><tr><th>Added latency</th><th>Order</th><th>Taps</th><th>Mean async</th>' +
-    '<th>SD async</th><th>Hit rate</th><th>Rating</th></tr></thead><tbody>';
+    '<thead><tr><th>Added latency</th><th>Delivered</th><th>Order</th><th>Taps</th><th>Mean async</th>' +
+    '<th>SD async</th><th>Extra taps</th><th>Rating</th></tr></thead><tbody>';
   CONDITIONS.forEach(function(L){
     var b = byLat[L];
     html += '<tr><td>' + L + ' ms</td>' +
+      '<td>' + (b && isFinite(b.deliveredLatencyMs) ? b.deliveredLatencyMs.toFixed(1) + " ms" : "&mdash;") + '</td>' +
       '<td>' + (b ? b.position : "&mdash;") + '</td>' +
       '<td>' + (b ? b.n : "&mdash;") + '</td>' +
       '<td>' + (b && isFinite(b.meanAsynchronyMs) ? b.meanAsynchronyMs.toFixed(1) : "&mdash;") + '</td>' +
       '<td>' + (b && isFinite(b.sdAsynchronyMs) ? b.sdAsynchronyMs.toFixed(1) : "&mdash;") + '</td>' +
-      '<td>' + (b && isFinite(b.hitRate) ? (b.hitRate*100).toFixed(0) + "%" : "&mdash;") + '</td>' +
+      '<td>' + (b && isFinite(b.unmatchedTaps) ? b.unmatchedTaps : "&mdash;") + '</td>' +
       '<td>' + (b && b.rating ? b.rating : "&mdash;") + '</td></tr>';
   });
   html += '</tbody></table></div>' +
+    '<p class="note"><b>Delivered</b> is measured from the log rather than assumed: each feedback ' +
+    'event minus the tap that caused it, median per block. Where it differs from the latency asked ' +
+    'for, the delivered figure is the one that happened to the participant. ' +
+    '<b>Extra taps</b> are taps that found no beat to pair with, usually taps during the lead-in.</p>' +
     '<p class="note">Negative mean asynchrony is expected: people habitually tap slightly ahead of ' +
-    'the beat (Repp, 2005). It is a property of human timing, not a bug in the apparatus.</p></section>';
+    'the beat (Repp, 2005). It is a property of human timing, not a bug in the apparatus.</p>' +
+    '<p class="note" style="border-left-color:var(--warn)"><b>Hit rate is no longer reported.</b> ' +
+    'It counted taps landing within a fixed window either side of the beat, but this apparatus has ' +
+    'a large uncorrected systematic offset: with mean asynchrony near 160 ms and a 100 ms window, ' +
+    'almost nothing counts as a hit no matter how steadily the participant tapped. The number was ' +
+    'measuring the offset, not the performance, so reporting it would have been misleading. Once ' +
+    'the offset is measured against outside hardware the window can be centred on it, or on each ' +
+    'participant\u2019s own mean, and the measure becomes meaningful again.</p></section>';
+
+  html += tlxPanel(sess);
+  html += rankPanel(sess);
+  html += overlayPanel();
 
   // export
   html += '<section class="panel"><h2>Data</h2>' +
@@ -773,15 +1021,28 @@ function parseQuestCSV(text){
   }
   if (!rows.length) throw new Error("no rows");
 
+  // The questionnaires live outside the block structure: tlx carries its
+  // dimension in `block`, rank carries its place in `block`, so neither can be
+  // folded in with the per-block rows.
+  var tlx = [], rank = [];
+  rows.forEach(function(r){
+    if (r.kind === "tlx")  tlx.push({ dimension: r.block, value: r.idx });
+    if (r.kind === "rank") rank.push({ place: r.block, blockNumber: r.idx });
+  });
+  tlx.sort(function(a,b){ return a.dimension - b.dimension; });
+  rank.sort(function(a,b){ return a.place - b.place; });
+
   // group by block
   var byBlock = {};
   rows.forEach(function(r){
+    if (r.kind === "tlx" || r.kind === "rank") return;
     if (!isFinite(r.block) || r.block < 1) return;
-    if (!byBlock[r.block]) byBlock[r.block] = { beats:[], taps:[], rating:null, lat:r.lat };
+    if (!byBlock[r.block]) byBlock[r.block] = { beats:[], taps:[], feedback:[], rating:null, lat:r.lat };
     var b = byBlock[r.block];
-    if (r.kind === "beat")   b.beats.push(r.t);
-    if (r.kind === "tap")    b.taps.push(r.t);
-    if (r.kind === "rating") b.rating = r.idx;
+    if (r.kind === "beat")     b.beats.push(r.t);
+    if (r.kind === "tap")      b.taps.push(r.t);
+    if (r.kind === "feedback") b.feedback.push(r.t);
+    if (r.kind === "rating")   b.rating = r.idx;
     if (isFinite(r.lat)) b.lat = r.lat;
   });
 
@@ -792,26 +1053,40 @@ function parseQuestCSV(text){
       b.beats.sort(function(x,y){return x-y;});
       b.taps.sort(function(x,y){return x-y;});
 
-      var asy = [], taps = [], k, j;
-      for (k = 0; k < b.taps.length; k++){
-        var best = -1, bestD = Infinity;
-        for (j = 0; j < b.beats.length; j++){
-          var d = Math.abs(b.taps[k] - b.beats[j]);
-          if (d < bestD){ bestD = d; best = j; }
-        }
-        if (best < 0) continue;
-        var a = (b.taps[k] - b.beats[best]) / NS;
-        if (Math.abs(a) > ioiMs/2 + 60) continue;   // not plausibly this beat
-        asy.push(a);
-        taps.push({ beat: best, asynchronyMs: +a.toFixed(2) });
+      var k, j;
+      // One tap to one beat, closest pair first. Half an inter-onset interval
+      // is the widest a tap can be from its beat and still be that beat's.
+      var m = pairTapsToBeats(b.taps, b.beats, ioiMs/2, NS);
+      var asy = [], taps = [];
+      for (k = 0; k < m.pairs.length; k++){
+        asy.push(m.pairs[k].d);
+        taps.push({ beat: m.pairs[k].b, asynchronyMs: +m.pairs[k].d.toFixed(2) });
       }
 
+      // Hit rate is now beats that found a partner inside the tighter hit
+      // window, counted off the same one-to-one pairing, so no beat is credited
+      // twice.
       var hit = 0;
-      for (j = 0; j < b.beats.length; j++){
-        for (k = 0; k < b.taps.length; k++){
-          if (Math.abs(b.taps[k] - b.beats[j]) / NS <= S.hitWin){ hit++; break; }
+      for (k = 0; k < m.pairs.length; k++)
+        if (Math.abs(m.pairs[k].d) <= S.hitWin) hit++;
+
+      // The latency actually delivered, rather than the one asked for. Each
+      // feedback is matched to the tap that caused it, which is the nearest
+      // preceding tap; the median is reported because one stray pairing should
+      // not move the figure.
+      var deliv = [];
+      b.feedback.sort(function(x,y){ return x-y; });
+      for (k = 0; k < b.feedback.length; k++){
+        var prev = -1;
+        for (j = 0; j < b.taps.length; j++)
+          if (b.taps[j] <= b.feedback[k]) prev = j; else break;
+        if (prev >= 0){
+          var dl = (b.feedback[k] - b.taps[prev]) / NS;
+          if (dl >= 0 && dl < ioiMs) deliv.push(dl);
         }
       }
+      deliv.sort(function(x,y){ return x-y; });
+      var delivered = deliv.length ? deliv[Math.floor(deliv.length/2)] : NaN;
 
       return {
         latency: b.lat, position: bn, rating: b.rating,
@@ -819,6 +1094,10 @@ function parseQuestCSV(text){
         meanAsynchronyMs: +mean(asy).toFixed(2),
         sdAsynchronyMs:   +sd(asy).toFixed(2),
         hitRate: b.beats.length ? +(hit / b.beats.length).toFixed(4) : NaN,
+        deliveredLatencyMs: isFinite(delivered) ? +delivered.toFixed(1) : NaN,
+        beatsRecorded: b.beats.length,
+        tapsRecorded:  b.taps.length,
+        unmatchedTaps: m.unmatchedTaps,
         taps: taps
       };
     });
@@ -834,30 +1113,68 @@ function parseQuestCSV(text){
     audioTimed: audioTimed, clockExact: clockExact,
     audioOutputLatencyMs: 0,
     conditionOrder: blocks.map(function(b){ return b.latency; }),
+    tlx: tlx,
+    ranking: rank,
     blocks: blocks
   };
 }
 
 // ---------- load a saved session ----------
+// Takes several files at once, so two participants can be compared without
+// reloading the page between them. The last one read is the one shown in
+// detail; every one read is drawn on the overlay charts.
 $('load').addEventListener('change', function(e){
-  var f = e.target.files && e.target.files[0];
-  if (!f) return;
-  var r = new FileReader();
-  r.onload = function(){
-    var txt = String(r.result), sess = null;
-    try{
-      sess = (txt.trim().charAt(0) === "{") ? JSON.parse(txt) : parseQuestCSV(txt);
-      if (!sess || !sess.blocks || !sess.blocks.length) throw new Error("no blocks");
-    } catch(err){
-      el.latrep.textContent = "Could not read that file. Expected a session JSON from " +
-        "this app, or a taps_*.csv from the Quest build.";
+  var files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
+  if (!files.length) return;
+
+  var parsed = [], failed = [], pending = files.length;
+
+  files.forEach(function(f){
+    var r = new FileReader();
+    r.onload = function(){
+      var txt = String(r.result), sess = null;
+      try{
+        sess = (txt.trim().charAt(0) === "{") ? JSON.parse(txt) : parseQuestCSV(txt);
+        if (!sess || !sess.blocks || !sess.blocks.length) throw new Error("no blocks");
+        sess.sourceName = f.name;
+        parsed.push(sess);
+      } catch(err){
+        failed.push(f.name);
+      }
+      if (--pending === 0) done();
+    };
+    r.onerror = function(){ failed.push(f.name); if (--pending === 0) done(); };
+    r.readAsText(f);
+  });
+
+  function done(){
+    if (!parsed.length){
+      el.latrep.textContent = "Could not read " + failed.join(", ") +
+        ". Expected a session JSON from this app, or a taps_*.csv from the Quest build.";
       return;
     }
-    S.hitWin = sess.hitWindowMs || 100;
+    // Reading the same participant twice replaces rather than duplicates them,
+    // so re-loading a corrected file does not put two of them on the chart.
+    parsed.sort(function(a,b){ return String(a.participant).localeCompare(String(b.participant)); });
+    parsed.forEach(function(sess){
+      var at = -1, i;
+      for (i = 0; i < LOADED.length; i++)
+        if (LOADED[i].participant === sess.participant) { at = i; break; }
+      if (at >= 0) LOADED[at] = sess; else LOADED.push(sess);
+    });
+
+    var shown = parsed[parsed.length - 1];
+    S.hitWin = shown.hitWindowMs || 100;
     show(el.setup, false); show(el.stage, false); show(el.results, true);
-    renderResults(sess);
-  };
-  r.readAsText(f);
+    renderResults(shown);
+    if (failed.length){
+      var w = document.createElement('p');
+      w.className = 'note';
+      w.style.borderLeftColor = 'var(--bad)';
+      w.textContent = "Skipped: " + failed.join(", ");
+      el.results.insertBefore(w, el.results.firstChild);
+    }
+  }
 });
 
 $('go').onclick = function(){ S.skipPractice = false; startSession(); };
