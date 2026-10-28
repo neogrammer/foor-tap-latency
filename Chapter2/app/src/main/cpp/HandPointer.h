@@ -26,6 +26,7 @@
 
 class HandPointer {
 public:
+    static constexpr int kWrist     = 1;
     static constexpr int kThumbTip  = 5;
     static constexpr int kIndexProx = 7;
     static constexpr int kIndexTip  = 10;
@@ -42,6 +43,14 @@ public:
     // comfortably before a curl begins.
     static constexpr int kHistory = 16;
 
+    // Where one hand is pointing. Both are published so both cursors can be
+    // drawn; only the primary one drives the dwell timer.
+    struct HandHit {
+        bool  hit  = false;
+        float x = 0, y = 0;
+        float rayX = 0, rayY = 0, rayZ = 0;
+    };
+
     struct State {
         bool  active   = false;
         float x = 0, y = 0;                   // live hit point on the panel plane
@@ -49,15 +58,27 @@ public:
         bool  pinching = false;
         int   hand     = -1;
 
+        HandHit hands[2];                     // both, for drawing
+
         int   target   = 0;     // what is under the cursor, set by the caller
         float progress = 0;     // 0..1 dwell fill
         bool  fired    = false; // activated this frame, by dwell or by pinch
     };
 
-    // Step 1, once per frame: work out where the hand is pointing.
+    // Step 1, once per frame: work out where each hand is pointing.
+    //
+    // Both hands are tracked so either can drive the menus, and both cursors are
+    // drawn so it is obvious which hand the interface is listening to. Only one
+    // hand at a time owns the dwell timer, and it keeps ownership while it is
+    // still pointing at the panel, so raising the other hand mid-hold does not
+    // snatch the selection away.
     void Update(const HandTracking &hands, float planeZ) {
-        m_state.active   = false;
-        m_state.fired    = false;
+        m_state.active = false;
+        m_state.fired  = false;
+        m_state.hands[0] = HandHit();
+        m_state.hands[1] = HandHit();
+
+        bool  anyPinchClosed[2] = {false, false};
 
         for (int h = 0; h < 2; h++) {
             const HandTracking::Hand &hand = hands.GetHand(h);
@@ -67,20 +88,33 @@ public:
             bool  pinchNow = false;
 
             if (hand.aimValid) {
-                // Runtime-supplied ray when the extension is there.
+                // Runtime-supplied ray when the extension is there. This one is
+                // already arm-aligned, which is why it is preferred.
                 ox = hand.aimX;  oy = hand.aimY;  oz = hand.aimZ;
                 dx = hand.aimDX; dy = hand.aimDY; dz = hand.aimDZ;
                 pinchNow = hand.aimPinching;
             } else {
+                // Fallback ray: WRIST through fingertip, not knuckle through
+                // fingertip. The knuckle version points wherever the last bone
+                // of the finger happens to be aimed, which sits at roughly a
+                // right angle to the forearm and feels like the cursor is
+                // hinged off the hand instead of pointed by the arm.
                 const HandTracking::Joint &tt = hand.joints[kThumbTip];
-                const HandTracking::Joint &ip = hand.joints[kIndexProx];
+                const HandTracking::Joint &wr = hand.joints[kWrist];
                 const HandTracking::Joint &it = hand.joints[kIndexTip];
-                if (!tt.valid || !ip.valid || !it.valid) { m_pinched[h] = false; continue; }
+                const HandTracking::Joint &ip = hand.joints[kIndexProx];
+                if (!tt.valid || !it.valid) { m_pinched[h] = false; continue; }
 
                 ox = it.x; oy = it.y; oz = it.z;
-                dx = it.x - ip.x; dy = it.y - ip.y; dz = it.z - ip.z;
+                if (wr.valid) {
+                    dx = it.x - wr.x; dy = it.y - wr.y; dz = it.z - wr.z;
+                } else if (ip.valid) {
+                    dx = it.x - ip.x; dy = it.y - ip.y; dz = it.z - ip.z;
+                } else {
+                    m_pinched[h] = false; continue;
+                }
                 const float len = sqrtf(dx*dx + dy*dy + dz*dz);
-                if (len < 1e-5f) continue;
+                if (len < 1e-5f) { m_pinched[h] = false; continue; }
                 dx /= len; dy /= len; dz /= len;
 
                 const float px = tt.x - it.x, py = tt.y - it.y, pz = tt.z - it.z;
@@ -88,7 +122,7 @@ public:
                 pinchNow = m_pinched[h] ? (gap < kPinchOff) : (gap < kPinchOn);
             }
 
-            const bool justClosed = (!m_pinched[h] && pinchNow);
+            anyPinchClosed[h] = (!m_pinched[h] && pinchNow);
             m_pinched[h] = pinchNow;
 
             bool  hit = false;
@@ -99,31 +133,48 @@ public:
             }
             if (!hit) continue;
 
+            m_state.hands[h].hit  = true;
+            m_state.hands[h].x    = hx;
+            m_state.hands[h].y    = hy;
+            m_state.hands[h].rayX = ox;
+            m_state.hands[h].rayY = oy;
+            m_state.hands[h].rayZ = oz;
+
             // Ring of recent hit points, so a pinch can reach back past the curl.
             m_hx[h][m_head[h]] = hx;
             m_hy[h][m_head[h]] = hy;
             if (m_filled[h] < kHistory) m_filled[h]++;
             m_head[h] = (m_head[h] + 1) % kHistory;
+        }
 
-            if (!m_state.active || justClosed) {
-                m_state.active   = true;
-                m_state.hand     = h;
-                m_state.x        = hx;
-                m_state.y        = hy;
-                m_state.rayX     = ox;
-                m_state.rayY     = oy;
-                m_state.rayZ     = oz;
-                m_state.pinching = m_pinched[h];
-                if (justClosed) {
-                    // Oldest point in the ring: where the finger was aiming
-                    // before it started closing.
-                    if (m_filled[h] >= kHistory) {
-                        m_state.x = m_hx[h][m_head[h]];
-                        m_state.y = m_hy[h][m_head[h]];
-                    }
-                    m_pinchFired = true;
-                }
+        // Who drives the dwell. Keep the current hand while it is still on the
+        // panel; otherwise take whichever one is. A pinch always takes over,
+        // since it is a deliberate act.
+        int primary = -1;
+        if (m_primary >= 0 && m_state.hands[m_primary].hit) primary = m_primary;
+        for (int h = 0; h < 2 && primary < 0; h++)
+            if (m_state.hands[h].hit) primary = h;
+        for (int h = 0; h < 2; h++)
+            if (anyPinchClosed[h] && m_state.hands[h].hit) primary = h;
+
+        m_primary = primary;
+        if (primary < 0) return;
+
+        m_state.active   = true;
+        m_state.hand     = primary;
+        m_state.x        = m_state.hands[primary].x;
+        m_state.y        = m_state.hands[primary].y;
+        m_state.rayX     = m_state.hands[primary].rayX;
+        m_state.rayY     = m_state.hands[primary].rayY;
+        m_state.rayZ     = m_state.hands[primary].rayZ;
+        m_state.pinching = m_pinched[primary];
+
+        if (anyPinchClosed[primary]) {
+            if (m_filled[primary] >= kHistory) {
+                m_state.x = m_hx[primary][m_head[primary]];
+                m_state.y = m_hy[primary][m_head[primary]];
             }
+            m_pinchFired = true;
         }
     }
 
@@ -174,6 +225,7 @@ private:
     int   m_head[2] = {0, 0};
     int   m_filled[2] = {0, 0};
 
+    int   m_primary    = -1;
     int   m_lastTarget = 0;
     float m_held    = 0;
     float m_offTime = 0;
@@ -187,7 +239,10 @@ private:
 namespace PanelUI {
 
 constexpr float kPanelW = 1.05f;
-constexpr float kPanelH = 0.46f;
+// Was 0.46, which put the bottom text row straight through the GO button, so
+// the word LAGGY sat on top of it. Taller panel, GO moves down with it because
+// GoY is measured from the bottom edge.
+constexpr float kPanelH = 0.60f;
 
 constexpr float kGoW = 0.24f;
 constexpr float kGoH = 0.11f;
@@ -215,9 +270,22 @@ inline int DigitAt(float x, float y, float rowY) {
     return 0;
 }
 
+// A minus / plus pair, used on the first screen to step the participant number.
+// Two targets instead of a row of digits, so the number has no ceiling: the
+// study is not limited to however many digits happen to fit on a panel.
+constexpr float kStepHalf = 0.075f;
+inline float MinusX() { return -0.21f; }
+inline float PlusX()  { return  0.21f; }
+inline bool InStep(float x, float y, float rowY, float cx) {
+    return fabsf(x - cx)    <= kStepHalf + kSlop
+        && fabsf(y - rowY)  <= kStepHalf + kSlop;
+}
+
 // Target ids shared between the hit test and the dwell tracker.
 constexpr int kTargetNone  = 0;
 constexpr int kTargetGo    = 1;
+constexpr int kTargetMinus = 2;
+constexpr int kTargetPlus  = 3;
 inline int    TargetDigit(int v) { return 10 + v; }
 inline int    DigitOfTarget(int t) { return (t > 10 && t <= 17) ? t - 10 : 0; }
 

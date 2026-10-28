@@ -36,22 +36,41 @@
 class TapExperiment {
 public:
     // ----- tunables -------------------------------------------------------
-    // The proposal specifies 60 scored taps per block. 24 is set here so a full
-    // run takes about three minutes while you are still debugging. Raise it to
-    // 60 before collecting anything you intend to report.
-    static constexpr int kScoredTapsPerBlock = 24;
+    // The figure in the proposal. 24 was used during alpha debugging; every
+    // session reported from the beta onward uses this.
+    static constexpr int kScoredTapsPerBlock = 60;
     static constexpr int kLeadInBeats        = 4;
     static constexpr int kPracticeBeats      = 12;
     static constexpr int kConditionCount     = 5;
     static constexpr int kBeatIntervalMs     = 600;   // 100 BPM
     static constexpr int kRatingMin = 1, kRatingMax = 7;
-    static constexpr int kMaxBeats  = 256;
+    static constexpr int kMaxBeats  = 512;
+
+    // NASA-TLX, six dimensions on a 1..7 scale rather than the original 21-point
+    // line. The headset draws letters out of boxes, so a 21-point row will not
+    // fit beside its labels; seven points keeps the instrument's structure and
+    // its relative comparisons while fitting the display. Said plainly in the
+    // writeup, because it is a deviation from the published scale.
+    //
+    // PERFORMANCE keeps the original scale's direction, GOOD on the left and
+    // POOR on the right, so it is REVERSE SCORED against the other five.
+    static constexpr int kTlxCount = 6;
+    static const char *TlxLabel(int i) {
+        static const char *k[kTlxCount] = {
+            "MENTAL DEMAND", "PHYSICAL DEMAND", "TEMPORAL DEMAND",
+            "PERFORMANCE",   "EFFORT",          "FRUSTRATION"
+        };
+        return (i >= 0 && i < kTlxCount) ? k[i] : "";
+    }
+    static const char *TlxLow(int i)  { return (i == 3) ? "GOOD" : "LOW";  }
+    static const char *TlxHigh(int i) { return (i == 3) ? "POOR" : "HIGH"; }
 
     static constexpr int kConditions[kConditionCount] = {0, 50, 100, 200, 400};
 
     enum class Phase {
         Diagnostic, Welcome, PracticeIntro, Practice, ReadyCheck,
-        Countdown, Block, BlockComplete, Rating, Rest, Done
+        Countdown, Block, BlockComplete, Rating, Rest,
+        TlxIntro, Tlx, RankIntro, Rank, Done
     };
 
     struct RenderState {
@@ -62,6 +81,13 @@ public:
         int   tapsTarget     = kScoredTapsPerBlock;
         int   countdown      = 0;
         int   rating         = 4;
+        // Questionnaires
+        int   tlxIndex       = 0;       // 0..kTlxCount-1
+        int   tlxValue       = 4;
+        int   rankPosition   = 1;       // which place is being chosen, 1 = best
+        int   rankPick       = 0;       // block currently highlighted, 0 = none
+        int   participantNum = 1;       // shown on the diagnostic screen
+        bool  rankTaken[kConditionCount] = {false, false, false, false, false};
         float beatPulse      = 0;
         float feedbackFlash  = 0;
         bool  awaitingInput  = false;
@@ -83,9 +109,16 @@ public:
     void Init(const std::string &participant, int participantNumber) {
         m_participant = participant;
         BuildOrder(participantNumber);
+        m_participantNum = participantNumber;
         m_phase    = Phase::Diagnostic;
         m_blockIdx = -1;
         m_rating   = 4;
+        m_tlxIndex = 0;
+        m_tlxValue = 4;
+        m_feedbackMoved = 0;
+        m_rankPos  = 1;
+        m_rankPick = 0;
+        for (int i = 0; i < kConditionCount; i++) m_rankTaken[i] = false;
         m_logger.Clear();
     }
 
@@ -167,12 +200,72 @@ public:
             if (goPressed) {
                 m_logger.Record(frameTime, TapLogger::Kind::Rating,
                                 m_blockIdx + 1, CurrentLatencyMs(), m_rating);
-                m_phase = (m_blockIdx + 1 >= kConditionCount) ? Phase::Done : Phase::Rest;
+                m_phase = (m_blockIdx + 1 >= kConditionCount)
+                              ? Phase::TlxIntro : Phase::Rest;
             }
             break;
 
         case Phase::Rest:
             if (goPressed) { m_countdownFrom = frameTime; m_phase = Phase::Countdown; }
+            break;
+
+        // ---- NASA-TLX, one dimension per screen -------------------------
+        // Same two-step as the block rating: a digit selects, GO commits. The
+        // participant has already done that five times by now, so there is no
+        // new interaction to learn at the point they are most tired.
+        case Phase::TlxIntro:
+            if (goPressed) { m_tlxIndex = 0; m_tlxValue = 4; m_phase = Phase::Tlx; }
+            break;
+
+        case Phase::Tlx:
+            if (ratingPicked >= kRatingMin && ratingPicked <= kRatingMax)
+                m_tlxValue = ratingPicked;
+            if (goPressed) {
+                // block carries the dimension, index carries the answer.
+                m_logger.Record(frameTime, TapLogger::Kind::Tlx,
+                                m_tlxIndex, 0, m_tlxValue);
+                m_tlxIndex++;
+                m_tlxValue = 4;
+                if (m_tlxIndex >= kTlxCount) m_phase = Phase::RankIntro;
+            }
+            break;
+
+        // ---- Preference ranking -----------------------------------------
+        // Repeatedly pick the best of what is left. Four choices settle all
+        // five, because the last one is forced; taking it automatically saves
+        // the participant a meaningless screen.
+        case Phase::RankIntro:
+            if (goPressed) { m_rankPos = 1; m_rankPick = 0; m_phase = Phase::Rank; }
+            break;
+
+        case Phase::Rank:
+            if (ratingPicked >= 1 && ratingPicked <= kConditionCount &&
+                !m_rankTaken[ratingPicked - 1]) {
+                m_rankPick = ratingPicked;
+            }
+            if (goPressed && m_rankPick != 0) {
+                const int b = m_rankPick;
+                m_rankTaken[b - 1] = true;
+                // block = rank position, index = block number chosen. The
+                // latency that block ran at is recoverable from its block_start.
+                m_logger.Record(frameTime, TapLogger::Kind::Rank,
+                                m_rankPos, 0, b);
+                m_rankPos++;
+                m_rankPick = 0;
+
+                int remaining = 0, last = 0;
+                for (int i = 0; i < kConditionCount; i++)
+                    if (!m_rankTaken[i]) { remaining++; last = i + 1; }
+
+                if (remaining == 1) {
+                    m_rankTaken[last - 1] = true;
+                    m_logger.Record(frameTime, TapLogger::Kind::Rank,
+                                    m_rankPos, 0, last);
+                    m_phase = Phase::Done;
+                } else if (remaining == 0) {
+                    m_phase = Phase::Done;
+                }
+            }
             break;
 
         case Phase::Done:
@@ -191,10 +284,35 @@ public:
         r.feedbackFlash = m_feedbackFlash;
         r.awaitingInput = (m_phase != Phase::Practice && m_phase != Phase::Block
                            && m_phase != Phase::Countdown);
+        r.participantNum = m_participantNum;
+        r.tlxIndex      = m_tlxIndex;
+        r.tlxValue      = m_tlxValue;
+        r.rankPosition  = m_rankPos;
+        r.rankPick      = m_rankPick;
+        for (int i = 0; i < kConditionCount; i++) r.rankTaken[i] = m_rankTaken[i];
         r.audioReady    = (m_audio && m_audio->Ready());
         r.clockExact    = (m_clock && m_clock->Exact());
         return r;
     }
+
+    // Re-key the session to a different participant. Allowed only on the
+    // diagnostic screen, which is before any event exists, so there is nothing
+    // to invalidate. This is what lets one build run both participants: the
+    // number also picks the row of the Latin square, so P01 and P02 get
+    // different condition orders without a rebuild.
+    void SetParticipant(const std::string &id, int number) {
+        if (m_phase != Phase::Diagnostic) return;
+        m_participant    = id;
+        m_participantNum = number;
+        BuildOrder(number);
+    }
+    int  ParticipantNumber() const { return m_participantNum; }
+    bool AtDiagnostic() const { return m_phase == Phase::Diagnostic; }
+
+    // How many taps this session had their click moved forward to stay audible.
+    // A large number at short latencies means the pipeline's own floor is above
+    // the condition being asked for, which belongs in the writeup.
+    int FeedbackMovedCount() const { return m_feedbackMoved; }
 
     bool Finished() const { return m_phase == Phase::Done; }
     bool AudioActive() const { return m_audioActive; }
@@ -294,15 +412,32 @@ private:
         }
         m_tapsThisBlock++;
 
-        const XrTime due = t + (XrTime)m_latencyNs;
+        XrTime due = t + (XrTime)m_latencyNs;
 
         // Pin the feedback click to a sample so the delivered latency is the
         // nominal one rather than the nominal one rounded up to a frame.
+        //
+        // A click due sooner than the audio stream can physically produce one
+        // gets moved forward by ScheduleClick, which returns the frame it really
+        // used. When that happens the delivered latency is the moved one, so the
+        // log and the on-screen flash both follow it. The alternative, used
+        // until a participant noticed, was that the shortest conditions produced
+        // no sound at all and the log claimed otherwise.
         if (m_audioActive && m_audio && m_clock) {
             int64_t mono = 0, frame = 0;
             if (m_clock->XrToMonotonic(due, &mono) &&
                 m_audio->MonotonicNsToFrame(mono, &frame)) {
-                m_audio->ScheduleClick(frame, AudioEngine::kVoiceFeedback);
+                const int64_t actual =
+                    m_audio->ScheduleClick(frame, AudioEngine::kVoiceFeedback);
+                if (actual > frame) {
+                    int64_t movedMono = 0;
+                    XrTime  movedXr   = 0;
+                    if (m_audio->FrameToMonotonicNs(actual, &movedMono) &&
+                        m_clock->MonotonicToXr(movedMono, &movedXr)) {
+                        due = movedXr;
+                        m_feedbackMoved++;
+                    }
+                }
             }
         }
         if (m_pendingCount < kMaxPending) m_pending[m_pendingCount++] = due;
@@ -331,6 +466,7 @@ private:
     bool         m_audioActive = false;
 
     std::string m_participant = "P01";
+    int         m_participantNum = 1;
     int         m_order[kConditionCount]{};
     Phase       m_phase    = Phase::Diagnostic;
     int         m_blockIdx = -1;
@@ -347,6 +483,13 @@ private:
     XrTime  m_countdownFrom = 0;
     int     m_countdown     = 3;
     int     m_rating        = 4;
+
+    int     m_feedbackMoved = 0;
+    int     m_tlxIndex   = 0;
+    int     m_tlxValue   = 4;
+    int     m_rankPos    = 1;            // 1 = most responsive
+    int     m_rankPick   = 0;            // highlighted block, 0 = nothing yet
+    bool    m_rankTaken[kConditionCount] = {false, false, false, false, false};
 
     float   m_beatPulse     = 0;
     float   m_feedbackFlash = 0;

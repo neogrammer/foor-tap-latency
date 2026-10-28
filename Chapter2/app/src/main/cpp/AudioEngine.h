@@ -81,15 +81,49 @@ public:
     bool Ready() const      { return m_ready.load(std::memory_order_acquire); }
     int  SampleRate() const { return m_sampleRate; }
 
-    // Schedule a click at an absolute stream frame position. Safe from the main
-    // thread: slots are claimed with an atomic, and the audio callback only ever
-    // reads them.
-    void ScheduleClick(int64_t frame, int voice) {
-        if (!Ready() || voice < 0 || voice >= kVoiceCount) return;
+    // Schedule a click at an absolute stream frame position, and return the
+    // frame it was ACTUALLY placed at.
+    //
+    // -----------------------------------------------------------------------
+    // WHY THIS CLAMPS FORWARD
+    //
+    // Render() drops any click whose frame is already behind the callback's
+    // write head, because stacking late clicks would smear the metronome. That
+    // is right for a beat, which is always scheduled well ahead. It was silently
+    // wrong for tap feedback: at 0 ms the click is due at the moment of the tap,
+    // which is already in the past by the time the audio thread sees it, so the
+    // shortest conditions produced no sound at all. The participant who found
+    // this said it plainly: without the click there is nothing to judge the lag
+    // against, so the baseline condition stopped being a baseline.
+    //
+    // There is a floor on how soon a sound can come out, set by the stream's
+    // buffer. Pretending otherwise loses the sound; clamping to the floor keeps
+    // it and reports what really happened. The caller logs the returned frame,
+    // so the analysis reads the delivered latency rather than the requested one.
+    // -----------------------------------------------------------------------
+    int64_t ScheduleClick(int64_t frame, int voice) {
+        if (!Ready() || voice < 0 || voice >= kVoiceCount) return -1;
+
+        // Two callbacks' worth of headroom: one for the buffer being filled
+        // right now, one for the next, so the click cannot land behind the head
+        // between this call and the audio thread reading it.
+        const int32_t burst = m_lastBurst.load(std::memory_order_relaxed);
+        const int64_t floorFrame =
+            FramesWritten() + (int64_t)(burst > 0 ? burst : 192) * 2;
+        if (frame < floorFrame) frame = floorFrame;
+
         const uint32_t slot = m_writeIndex.fetch_add(1, std::memory_order_relaxed) % kMaxScheduled;
         m_sched[slot].frame.store(frame, std::memory_order_relaxed);
         m_sched[slot].voice.store(voice, std::memory_order_relaxed);
         m_sched[slot].live.store(true,   std::memory_order_release);
+        return frame;
+    }
+
+    // The soonest a click scheduled right now could be heard, in frames. Lets
+    // the experiment report its own floor instead of assuming zero.
+    int64_t EarliestFrame() const {
+        const int32_t burst = m_lastBurst.load(std::memory_order_relaxed);
+        return FramesWritten() + (int64_t)(burst > 0 ? burst : 192) * 2;
     }
 
     // Frames the callback has produced so far. Approximate, for scheduling ahead.
@@ -129,6 +163,10 @@ private:
 
     static constexpr int kMaxScheduled = 128;
 
+    // Frames per callback, learned from the audio thread. Used to work out how
+    // far ahead a click has to be scheduled to survive.
+    std::atomic<int32_t> m_lastBurst{0};
+
     // Pull a (framePosition, nanoseconds) pair from the stream. Cached briefly so
     // every scheduling call is not a syscall.
     bool Anchor(int64_t *pos, int64_t *ns) {
@@ -160,6 +198,7 @@ private:
 
     aaudio_data_callback_result_t Render(float *out, int32_t numFrames) {
         const int64_t base = m_framesWritten.load(std::memory_order_relaxed);
+        m_lastBurst.store(numFrames, std::memory_order_relaxed);
         std::memset(out, 0, sizeof(float) * (size_t)numFrames);
 
         // Start any click whose moment falls inside this buffer.

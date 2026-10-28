@@ -23,12 +23,41 @@ XrVector3f operator*(XrVector3f a, float b) {
 #include "TextRenderer.h"
 #include "HandPointer.h"
 #include "TapExperiment.h"
+#include <dirent.h>
 
 class VulkanXRay {
 private:
     struct RenderLayerInfo;
 public:
 
+
+    // Next free participant number, worked out from the session files already
+    // written. Scanning beats keeping a counter somewhere: there is no stored
+    // state to drift out of step with the data, and deleting a bad session
+    // frees its number again. No ceiling, because a study should not be capped
+    // by how many digits fit on a panel.
+    static int ScanNextParticipant(const char *dir) {
+        if (!dir) return 1;
+        DIR *d = opendir(dir);
+        if (!d) return 1;
+        int highest = 0;
+        while (struct dirent *e = readdir(d)) {
+            int num = 0;
+            if (sscanf(e->d_name, "taps_P%d.csv", &num) == 1 && num > highest)
+                highest = num;
+        }
+        closedir(d);
+        return highest + 1;
+    }
+
+    void SetParticipantNumber(int num) {
+        if (num < 1) num = 1;
+        m_participantNum = num;
+        char pid[16];
+        snprintf(pid, sizeof(pid), "P%02d", num);
+        m_participantId = pid;
+        m_exp.SetParticipant(m_participantId, m_participantNum);
+    }
 
     void WriteSessionCSV() {
         if (m_wroteCSV) return;
@@ -86,6 +115,16 @@ public:
                              "which is quantised to the display frame.");
         }
 
+        // Default to the next unused number, so the common case is to walk in,
+        // confirm, and start. The first screen can still step it if a session
+        // has to be redone.
+        if (androidApp && androidApp->activity->externalDataPath) {
+            m_participantNum = ScanNextParticipant(androidApp->activity->externalDataPath);
+            char pid[16];
+            snprintf(pid, sizeof(pid), "P%02d", m_participantNum);
+            m_participantId = pid;
+        }
+        XR_TUT_LOG("Participant for this session: " << m_participantId);
         m_exp.Init(m_participantId, m_participantNum);
 
         while (m_applicationRunning) {
@@ -536,12 +575,19 @@ private:
             const float panelCY    = -m_viewHeightM + 1.52f;
             const float ratingRowY = -m_viewHeightM + 1.53f;
 
+            const bool atDiag = m_exp.AtDiagnostic();
+
             int target = PanelUI::kTargetNone;
             {
                 const HandPointer::State &p = m_pointer.Get();
                 if (p.active) {
                     if (PanelUI::InGo(p.x, p.y, panelCY)) {
                         target = PanelUI::kTargetGo;
+                    } else if (atDiag) {
+                        if (PanelUI::InStep(p.x, p.y, ratingRowY, PanelUI::MinusX()))
+                            target = PanelUI::kTargetMinus;
+                        else if (PanelUI::InStep(p.x, p.y, ratingRowY, PanelUI::PlusX()))
+                            target = PanelUI::kTargetPlus;
                     } else {
                         const int d = PanelUI::DigitAt(p.x, p.y, ratingRowY);
                         if (d) target = PanelUI::TargetDigit(d);
@@ -554,7 +600,9 @@ private:
             bool go   = m_input.Confirm().justPressed;
             int  pick = 0;
             if (ptr.fired) {
-                if (ptr.target == PanelUI::kTargetGo) go = true;
+                if      (ptr.target == PanelUI::kTargetGo)    go = true;
+                else if (ptr.target == PanelUI::kTargetMinus) SetParticipantNumber(m_participantNum - 1);
+                else if (ptr.target == PanelUI::kTargetPlus)  SetParticipantNumber(m_participantNum + 1);
                 else {
                     const int d = PanelUI::DigitOfTarget(ptr.target);
                     if (d) pick = d;
@@ -598,11 +646,18 @@ private:
     }
 
 
-    static XrVector3f Accent() { return {0.25f, 0.55f, 0.95f}; }
-    static XrVector3f Green()  { return {0.20f, 0.78f, 0.45f}; }
-    static XrVector3f Dim()    { return {0.26f, 0.27f, 0.31f}; }
+    // Colour carries meaning here, because a participant reads these panels
+    // once and should never have to work out what is clickable.
+    //   green = text to read        blue = selected, or about to be
+    //   grey  = an option not taken
+    // The first run used grey for body text on a near-black panel and it was
+    // hard to read, so grey is now reserved for unchosen options only.
+    static XrVector3f Read()   { return {0.34f, 0.93f, 0.55f}; }   // body text
+    static XrVector3f Accent() { return {0.36f, 0.66f, 1.00f}; }   // selected
+    static XrVector3f Hot()    { return {0.58f, 0.84f, 1.00f}; }   // under cursor
+    static XrVector3f Green()  { return {0.24f, 0.86f, 0.50f}; }   // confirmation
+    static XrVector3f Dim()    { return {0.30f, 0.32f, 0.38f}; }   // not chosen
     static XrVector3f Ink()    { return {0.72f, 0.78f, 0.88f}; }
-    static XrVector3f Hot()    { return {0.45f, 0.75f, 1.00f}; }
 
     // Text and buttons sit just in front of the panel.
     static constexpr float kTextZ  = -1.26f;
@@ -617,9 +672,9 @@ private:
             [&](XrPosef p, XrVector3f sc, XrVector3f col) { RenderCuboid(p, sc, col); });
     }
 
-    void Pip(float x, float y, XrVector3f c) {
+    void Pip(float x, float y, XrVector3f c, float s = 0.075f) {
         RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {x, y, -1.27f}},
-                     {0.075f, 0.075f, 0.02f}, c);
+                     {s, s, 0.02f}, c);
     }
 
     // A dwell bar under a target. Fills left to right as the participant holds
@@ -644,28 +699,48 @@ private:
         RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {gx, gy, -1.285f}},
                      {PanelUI::kGoW, PanelUI::kGoH, 0.018f},
                      hot ? Accent() : XrVector3f{0.18f, 0.22f, 0.30f});
-        SayAt("GO", gx, gy, 0.050f, hot ? XrVector3f{1.0f, 1.0f, 1.0f} : Ink());
+        SayAt("GO", gx, gy, 0.050f, hot ? XrVector3f{1.0f, 1.0f, 1.0f} : Read());
         if (hot) DwellBar(gx, gy - PanelUI::kGoH * 0.5f - 0.022f,
                           PanelUI::kGoW * 0.85f, ptr.progress);
     }
 
-    // Where the hand is aiming, and a short stub along the finger so the ray is
-    // legible without drawing a full laser.
-    void DrawPointer(const HandPointer::State &ptr) {
-        if (!ptr.active) return;
-        const float cs = 0.022f + 0.014f * (ptr.progress > 1.0f ? 1.0f : ptr.progress);
-        RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {ptr.x, ptr.y, kTextZ + 0.012f}},
-                     {cs, cs, 0.012f}, (ptr.progress > 0.02f) ? Hot() : Accent());
-
-        const float dx = ptr.x - ptr.rayX, dy = ptr.y - ptr.rayY, dz = kTextZ - ptr.rayZ;
+    // One cursor per pointing hand, plus a short stub along the aim direction so
+    // the ray is legible without drawing a full laser across the room.
+    //
+    // Both hands get a cursor, because only one controller is in play and it is
+    // on the floor: whichever hand is free should be able to drive the menus.
+    // The hand that owns the dwell timer is drawn solid and grows as the hold
+    // fills; the other is a small hollow dot, so it is always clear which one
+    // the interface is listening to.
+    void DrawRayStub(float ox, float oy, float oz, float hx, float hy, XrVector3f col) {
+        const float dx = hx - ox, dy = hy - oy, dz = kTextZ - oz;
         const float len = sqrtf(dx*dx + dy*dy + dz*dz);
         if (len < 0.05f) return;
         const float stub = 0.10f;
         RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f},
-                      {ptr.rayX + dx / len * stub * 0.5f,
-                       ptr.rayY + dy / len * stub * 0.5f,
-                       ptr.rayZ + dz / len * stub * 0.5f}},
-                     {0.008f, 0.008f, stub}, Dim());
+                      {ox + dx / len * stub * 0.5f,
+                       oy + dy / len * stub * 0.5f,
+                       oz + dz / len * stub * 0.5f}},
+                     {0.008f, 0.008f, stub}, col);
+    }
+
+    void DrawPointer(const HandPointer::State &ptr) {
+        for (int h = 0; h < 2; h++) {
+            const HandPointer::HandHit &hh = ptr.hands[h];
+            if (!hh.hit) continue;
+
+            const bool primary = (ptr.active && ptr.hand == h);
+            if (primary) {
+                const float cs = 0.022f + 0.014f * (ptr.progress > 1.0f ? 1.0f : ptr.progress);
+                RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {hh.x, hh.y, kTextZ + 0.012f}},
+                             {cs, cs, 0.012f}, (ptr.progress > 0.02f) ? Hot() : Accent());
+                DrawRayStub(hh.rayX, hh.rayY, hh.rayZ, hh.x, hh.y, Accent());
+            } else {
+                RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {hh.x, hh.y, kTextZ + 0.010f}},
+                             {0.013f, 0.013f, 0.010f}, Dim());
+                DrawRayStub(hh.rayX, hh.rayY, hh.rayZ, hh.x, hh.y, Dim());
+            }
+        }
     }
 
     // Everything is a box, including the letters. One pipeline, no textures.
@@ -706,7 +781,10 @@ private:
                      {PanelUI::kPanelW, PanelUI::kPanelH, 0.03f},
                      {0.14f, 0.15f, 0.18f});
 
-        const float L1 = floorY + 1.63f;   // upper line
+        // Panel is 0.60 tall centred on panelCY, so it spans floorY+1.22 to
+        // floorY+1.82. GO sits at the bottom edge; L3 stays well clear of it.
+        const float L0 = floorY + 1.73f;   // progress row, questionnaires only
+        const float L1 = floorY + 1.64f;   // upper line
         const float L2 = floorY + 1.53f;   // middle line, also the rating row
         const float L3 = floorY + 1.44f;   // lower line
 
@@ -714,35 +792,60 @@ private:
 
         switch (rs.phase) {
 
-        case Phase::Diagnostic:
-            // The one unknown in the design, answerable in under a minute.
-            Say("STEP ON PEDAL", L1, 0.050f, Ink());
-            Pip(0.10f, L2, rs.leftPressed  ? Green() : Dim());
-            Pip(0.22f, L2, rs.rightPressed ? Green() : Dim());
-            Pip(0.34f, L2, rs.handsActive  ? Green() : Dim());
-            Pip(0.46f, L2, rs.audioReady   ? Green() : Dim());
-            Say("POINT AT GO AND HOLD", L3, 0.032f, Dim());
+        case Phase::Diagnostic: {
+            // Two jobs on one screen: confirm the floor controller is being
+            // heard, and confirm who is about to be recorded. The number
+            // defaults to the next unused one, so normally this is a glance.
+            Say("STEP ON PEDAL", L1, 0.044f, Read());
+
+            // Minus and plus rather than a row of digits, so there is no
+            // ceiling on how many participants a study can have.
+            const bool hotMinus = (ptr.target == PanelUI::kTargetMinus);
+            const bool hotPlus  = (ptr.target == PanelUI::kTargetPlus);
+            SayAt("-", PanelUI::MinusX(), L2, 0.055f, hotMinus ? Hot() : Dim());
+            SayAt("+", PanelUI::PlusX(),  L2, 0.055f, hotPlus  ? Hot() : Dim());
+            snprintf(buf, sizeof(buf), "P%02d", rs.participantNum);
+            SayAt(buf, 0.0f, L2, 0.058f, Accent());
+            if (hotMinus) DwellBar(PanelUI::MinusX(), L2 - 0.050f, 0.090f, ptr.progress);
+            if (hotPlus)  DwellBar(PanelUI::PlusX(),  L2 - 0.050f, 0.090f, ptr.progress);
+
+            Say("HOLD + OR - TO CHANGE WHO", L3, 0.026f, Read());
+
+            // Status lights, moved to the bottom right corner. They used to sit
+            // across the middle of the panel, straight through the text.
+            // Left controller, Right controller, Hands, Audio.
+            const float ly = PanelUI::GoY(panelCY);
+            const float lx = 0.19f, lstep = 0.095f;
+            Pip(lx + 0.0f * lstep, ly, rs.leftPressed  ? Green() : Dim(), 0.055f);
+            Pip(lx + 1.0f * lstep, ly, rs.rightPressed ? Green() : Dim(), 0.055f);
+            Pip(lx + 2.0f * lstep, ly, rs.handsActive  ? Green() : Dim(), 0.055f);
+            Pip(lx + 3.0f * lstep, ly, rs.audioReady   ? Green() : Dim(), 0.055f);
+            SayAt("L", lx + 0.0f * lstep, ly + 0.056f, 0.022f, Dim());
+            SayAt("R", lx + 1.0f * lstep, ly + 0.056f, 0.022f, Dim());
+            SayAt("H", lx + 2.0f * lstep, ly + 0.056f, 0.022f, Dim());
+            SayAt("A", lx + 3.0f * lstep, ly + 0.056f, 0.022f, Dim());
             break;
+        }
 
         case Phase::Welcome:
-            Say("TAP WITH THE BEAT", L1, 0.050f, Ink());
-            Say("5 BLOCKS",          L3, 0.038f, Dim());
+            Say("TAP WITH THE BEAT", L1, 0.050f, Read());
+            Say("5 BLOCKS",          L3, 0.038f, Read());
             break;
 
         case Phase::PracticeIntro:
-            Say("PRACTICE",     L1, 0.050f, Ink());
-            Say("NOT RECORDED", L3, 0.038f, Dim());
+            Say("PRACTICE",     L1, 0.050f, Read());
+            Say("NOT RECORDED", L3, 0.038f, Read());
             break;
 
         case Phase::Practice:
-            Say("PRACTICE", L1, 0.050f, Dim());
+            Say("PRACTICE", L1, 0.050f, Read());
             wantsGo = false;
             break;
 
         case Phase::ReadyCheck:
             snprintf(buf, sizeof(buf), "BLOCK %d OF %d", rs.blockNumber + 1, rs.blockTotal);
-            Say(buf,              L1, 0.050f, Ink());
-            Say("TAP EVERY BEAT", L3, 0.038f, Dim());
+            Say(buf,              L1, 0.050f, Read());
+            Say("TAP EVERY BEAT", L3, 0.038f, Read());
             break;
 
         case Phase::Countdown:
@@ -753,7 +856,7 @@ private:
 
         case Phase::Block: {
             snprintf(buf, sizeof(buf), "BLOCK %d OF %d", rs.blockNumber, rs.blockTotal);
-            Say(buf, L1, 0.042f, Dim());
+            Say(buf, L1, 0.042f, Read());
             const int filled = (rs.tapsTarget > 0)
                 ? (rs.tapsThisBlock * 10) / rs.tapsTarget : 0;
             for (int i = 0; i < 10; i++)
@@ -770,7 +873,7 @@ private:
         case Phase::Rating: {
             // Pinch a digit to select, then pinch GO. Hovered digit lights up so
             // aiming is visible before committing.
-            Say("HOW RESPONSIVE?", L1, 0.046f, Ink());
+            Say("HOW RESPONSIVE?", L1, 0.046f, Read());
             const int hover = PanelUI::DigitOfTarget(ptr.target);
             for (int v = 1; v <= 7; v++) {
                 snprintf(buf, sizeof(buf), "%d", v);
@@ -782,18 +885,77 @@ private:
             if (hover) DwellBar(PanelUI::DigitX(hover), L2 - 0.042f, 0.085f, ptr.progress);
             // Anchors. Without these a participant has no idea which end of the
             // scale is which, and the rating is noise.
-            SayAt("LAGGY",   PanelUI::DigitX(1), L3, 0.030f, Dim());
-            SayAt("INSTANT", PanelUI::DigitX(7), L3, 0.030f, Dim());
+            SayAt("LAGGY",   PanelUI::DigitX(1), L3, 0.030f, Read());
+            SayAt("INSTANT", PanelUI::DigitX(7), L3, 0.030f, Read());
             break;
         }
 
         case Phase::Rest:
-            Say("REST", L1, 0.050f, Ink());
+            Say("REST", L1, 0.050f, Read());
             break;
+
+        // ---- NASA-TLX ---------------------------------------------------
+        case Phase::TlxIntro:
+            Say("A FEW QUESTIONS", L1, 0.046f, Read());
+            Say("ABOUT THE WHOLE SESSION", L3, 0.030f, Read());
+            break;
+
+        case Phase::Tlx: {
+            // Deliberately the same shape as the block rating: digits on the
+            // same row, same anchors underneath, same GO. Nothing new to learn.
+            Say(TapExperiment::TlxLabel(rs.tlxIndex), L1, 0.044f, Read());
+
+            for (int i = 0; i < TapExperiment::kTlxCount; i++)
+                Pip(-0.155f + 0.062f * i, L0,
+                    (i < rs.tlxIndex) ? Green() : (i == rs.tlxIndex ? Accent() : Dim()));
+
+            const int hover = PanelUI::DigitOfTarget(ptr.target);
+            for (int v = 1; v <= 7; v++) {
+                snprintf(buf, sizeof(buf), "%d", v);
+                XrVector3f c = Dim();
+                if (v == rs.tlxValue)  c = Accent();
+                else if (v == hover)   c = Hot();
+                SayAt(buf, PanelUI::DigitX(v), L2, 0.055f, c);
+            }
+            if (hover) DwellBar(PanelUI::DigitX(hover), L2 - 0.042f, 0.085f, ptr.progress);
+
+            SayAt(TapExperiment::TlxLow(rs.tlxIndex),  PanelUI::DigitX(1), L3, 0.030f, Read());
+            SayAt(TapExperiment::TlxHigh(rs.tlxIndex), PanelUI::DigitX(7), L3, 0.030f, Read());
+            break;
+        }
+
+        // ---- Preference ranking -----------------------------------------
+        case Phase::RankIntro:
+            Say("RANK THE BLOCKS", L1, 0.046f, Read());
+            Say("MOST RESPONSIVE FIRST", L3, 0.030f, Read());
+            break;
+
+        case Phase::Rank: {
+            snprintf(buf, sizeof(buf), "PICK NUMBER %d", rs.rankPosition);
+            Say(buf, L1, 0.044f, Read());
+
+            const int hover = PanelUI::DigitOfTarget(ptr.target);
+            bool hoverLive = false;
+            for (int v = 1; v <= TapExperiment::kConditionCount; v++) {
+                const bool taken = rs.rankTaken[v - 1];
+                snprintf(buf, sizeof(buf), "%d", v);
+                XrVector3f c = taken ? XrVector3f{0.17f, 0.18f, 0.21f} : Dim();
+                if (!taken && v == rs.rankPick)  c = Accent();
+                else if (!taken && v == hover)   { c = Hot(); hoverLive = true; }
+                SayAt(buf, PanelUI::DigitX(v), L2, 0.055f, c);
+            }
+            // Only draw the dwell bar under a block still available, so holding
+            // on one already spent does not look like it is about to do something.
+            if (hoverLive)
+                DwellBar(PanelUI::DigitX(hover), L2 - 0.042f, 0.085f, ptr.progress);
+
+            Say("ALREADY PICKED ARE DARK", L3, 0.028f, Read());
+            break;
+        }
 
         case Phase::Done:
             Say("SESSION COMPLETE", L1, 0.046f, Green());
-            Say("THANK YOU",        L3, 0.038f, Ink());
+            Say("THANK YOU",        L3, 0.038f, Read());
             wantsGo = false;
             break;
         }
@@ -941,9 +1103,18 @@ private:
 
 
     }
+    // Every box drawn in a frame takes one slot in the camera uniform buffer,
+    // which is allocated once at this size. Letters are boxes too, so a wordy
+    // screen can push the count up fast. Going past the end used to write past
+    // the buffer; now the extra boxes are simply dropped. Missing geometry is a
+    // far better failure than a corrupted uniform buffer mid-session.
+    static constexpr size_t kMaxCuboidsPerEye = 512;
+
     size_t renderCuboidIndex = 0;
     void RenderCuboid(XrPosef pose, XrVector3f scale, XrVector3f color)
     {
+        if (renderCuboidIndex >= kMaxCuboidsPerEye) return;
+
         XrMatrix4x4f_CreateTranslationRotationScale(&cameraConstants.model, &pose.position, &pose.orientation, &scale);
 
         XrMatrix4x4f_Multiply(&cameraConstants.modelViewProj, &cameraConstants.viewProj, &cameraConstants.model);
@@ -1021,7 +1192,7 @@ private:
 
         m_indexBuffer = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::INDEX, sizeof(uint32_t), sizeof(cubeIndices), &cubeIndices});
 
-        size_t numberOfCuboids = 256;
+        size_t numberOfCuboids = kMaxCuboidsPerEye;
         m_uniformBuffer_Camera = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::UNIFORM, 0, sizeof(CameraConstants) * numberOfCuboids, nullptr});
         m_uniformBuffer_Normals = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::UNIFORM, 0, sizeof(normals), &normals});
 

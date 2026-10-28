@@ -22,7 +22,11 @@ public:
     // condition really lands somewhere near it. Record what happened, not what
     // was asked for.
     enum class Kind : uint8_t {
-        Beat = 0, Tap = 1, Rating = 2, BlockStart = 3, BlockEnd = 4, Feedback = 5
+        Beat = 0, Tap = 1, Rating = 2, BlockStart = 3, BlockEnd = 4, Feedback = 5,
+        // Added for the beta. Tlx stores the dimension in `block` (0..5) and the
+        // 1..7 answer in `index`. Rank stores the rank position in `block`
+        // (1 = most responsive) and the block number chosen in `index`.
+        Tlx = 6, Rank = 7
     };
 
     struct Event {
@@ -69,6 +73,8 @@ public:
                 case Kind::BlockStart: k = "block_start"; break;
                 case Kind::BlockEnd:   k = "block_end";   break;
                 case Kind::Feedback:   k = "feedback";    break;
+                case Kind::Tlx:        k = "tlx";         break;
+                case Kind::Rank:       k = "rank";        break;
             }
             fprintf(f, "%s,%lld,%d,%d,%d,%lld\n",
                     k,
