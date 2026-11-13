@@ -14,13 +14,24 @@
 // a known presentation time; XrClock converts that to XrTime. The beat is
 // therefore logged at the instant it will actually be HEARD, not at the display
 // frame on which something flashed. The visual pulse still lands on a frame and
-// lags by up to 14 ms, but it is accompaniment, not the stimulus.
+// lags by up to one frame, but it is accompaniment, not the stimulus.
 //
-// THE TAP comes from XrActionStateBoolean::lastChangeTime, the runtime's own
-// record of when the button changed rather than the frame it was noticed on.
+// THE TAP has two possible sources. The CSV header says which one a session
+// used, because they are timed differently and must not be mixed blind.
 //
-// So both ends of the subtraction are finer than the display frame, which is the
-// only reason this measurement is worth anything on a 72 Hz device.
+//   The foot pedal. A switch on a Raspberry Pi, timestamped at the pin and
+//   carried to the headset over WiFi (network/PedalReceiver.h). Its time arrives
+//   on CLOCK_MONOTONIC and goes through the same XrClock conversion as the beat,
+//   so whatever error that conversion has is in both and drops out of the
+//   subtraction. This is the input the study was designed around.
+//
+//   The floor controller. XrActionStateBoolean::lastChangeTime. This was taken
+//   to be the moment the button changed. The session logs say otherwise: across
+//   622 taps it sat between 19.4 and 22.3 ms before the frame's display time and
+//   nowhere else, so on this runtime it is when the frame sampled the
+//   controller, not when the button went down. Controller taps are therefore
+//   quantised to the frame, 11.1 ms at the 90 Hz those sessions ran at. Still
+//   supported, as a fallback when no pedal is present.
 //
 // THE FEEDBACK is likewise scheduled at a sample, so a nominal 50 ms condition
 // delivers 50 ms rather than 50 ms rounded to the next frame.
@@ -29,7 +40,9 @@
 // session still runs. The CSV records which path produced it.
 // ---------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -66,6 +79,9 @@ public:
     static const char *TlxHigh(int i) { return (i == 3) ? "POOR" : "HIGH"; }
 
     static constexpr int kConditions[kConditionCount] = {0, 50, 100, 200, 400};
+
+    // Where a tap came from. Counted per session and written to the CSV header.
+    enum class TapSource : uint8_t { Controller = 0, Pedal = 1, PedalUntimed = 2 };
 
     enum class Phase {
         Diagnostic, Welcome, PracticeIntro, Practice, ReadyCheck,
@@ -119,7 +135,20 @@ public:
         m_rankPos  = 1;
         m_rankPick = 0;
         for (int i = 0; i < kConditionCount; i++) m_rankTaken[i] = false;
+        m_extCount = 0;
+        m_pedalStatCount = 0;
+        for (int i = 0; i < 3; i++) m_tapsBySource[i] = 0;
+        if (m_clock) m_clock->Hold(false);
         m_logger.Clear();
+    }
+
+    // A press from the foot pedal, already converted to XrTime by the caller.
+    // Call it before Update() in the same frame. `timed` is false when the time
+    // is only the packet's arrival and not the Pi's own timestamp. rttMs is the
+    // round trip of the clock sample behind the time; half of it bounds the
+    // error.
+    void PushPedalTap(XrTime t, bool timed, float rttMs) {
+        if (m_extCount < kMaxExt) m_ext[m_extCount++] = {t, timed, rttMs};
     }
 
     // goPressed     : GO was pinched (or the fallback trigger was pulled)
@@ -153,9 +182,12 @@ public:
 
         case Phase::Practice:
             ServiceBeats(frameTime, true);
-            if (tapJustPressed) RegisterTap(tapTime, frameTime, true);
+            TakeTaps(tapJustPressed, tapTime, frameTime, true);
             ServiceFeedback(frameTime, true);
-            if (m_beatsFired >= m_beatsTotal) m_phase = Phase::ReadyCheck;
+            if (m_beatsFired >= m_beatsTotal) {
+                if (m_clock) m_clock->Hold(false);
+                m_phase = Phase::ReadyCheck;
+            }
             break;
 
         case Phase::ReadyCheck:
@@ -179,11 +211,12 @@ public:
 
         case Phase::Block:
             ServiceBeats(frameTime, false);
-            if (tapJustPressed) RegisterTap(tapTime, frameTime, false);
+            TakeTaps(tapJustPressed, tapTime, frameTime, false);
             ServiceFeedback(frameTime, false);
             if (m_beatsFired >= m_beatsTotal) {
                 m_logger.Record(frameTime, TapLogger::Kind::BlockEnd,
                                 m_blockIdx + 1, CurrentLatencyMs(), m_tapsThisBlock);
+                if (m_clock) m_clock->Hold(false);
                 m_phase = Phase::BlockComplete;
             }
             break;
@@ -271,6 +304,11 @@ public:
         case Phase::Done:
             break;
         }
+
+        // Pedal presses are only meaningful to the frame they arrived in. One that
+        // lands on a screen that is not tapping is dropped here, so it can never
+        // leak into the first frame of the next block.
+        m_extCount = 0;
     }
 
     RenderState Render() const {
@@ -317,9 +355,50 @@ public:
     bool Finished() const { return m_phase == Phase::Done; }
     bool AudioActive() const { return m_audioActive; }
 
-    bool WriteCSV(const std::string &path) const {
+    bool WriteCSV(const std::string &path, const std::string &extraHeader = "") const {
+        std::string extra = SourceSummary();
+        if (!extraHeader.empty()) extra += " " + extraHeader;
         return m_logger.WriteCSV(path, m_participant, kBeatIntervalMs,
-                                 m_audioActive, m_clock && m_clock->Exact());
+                                 m_audioActive, m_clock && m_clock->Exact(), extra);
+    }
+
+    // Scored taps by source, for the CSV header and the end-of-session log.
+    int ControllerTaps() const { return m_tapsBySource[(int)TapSource::Controller]; }
+    int PedalTaps() const {
+        return m_tapsBySource[(int)TapSource::Pedal] + m_tapsBySource[(int)TapSource::PedalUntimed];
+    }
+
+    // What the header says about where the taps came from.
+    //   tap_source        pedal, controller, mixed or none
+    //   pedal_untimed     pedal taps that had to use the packet's arrival time
+    //   pedal_age_ms      median time from the foot going down to the frame that
+    //                     acted on it. This is what sets how soon a click can follow.
+    //   pedal_rtt_ms      median round trip of the clock samples behind the tap
+    //                     times. Half of it is the most a tap time can be off by.
+    std::string SourceSummary() const {
+        const int c = ControllerTaps(), p = PedalTaps();
+        const char *src = (p > 0 && c > 0) ? "mixed" : (p > 0) ? "pedal"
+                        : (c > 0) ? "controller" : "none";
+        char buf[320];
+        int n = snprintf(buf, sizeof(buf),
+                         "tap_source=%s controller_taps=%d pedal_taps=%d pedal_untimed=%d",
+                         src, c, p, m_tapsBySource[(int)TapSource::PedalUntimed]);
+        if (m_pedalStatCount > 0 && n > 0 && n < (int)sizeof(buf)) {
+            float age[kMaxPedalStats], rtt[kMaxPedalStats];
+            float worst = 0.0f;
+            for (int i = 0; i < m_pedalStatCount; i++) {
+                age[i] = m_pedalAgeMs[i];
+                rtt[i] = m_pedalRttMs[i];
+                if (age[i] > worst) worst = age[i];
+            }
+            const int mid = m_pedalStatCount / 2;
+            std::nth_element(age, age + mid, age + m_pedalStatCount);
+            std::nth_element(rtt, rtt + mid, rtt + m_pedalStatCount);
+            snprintf(buf + n, sizeof(buf) - (size_t)n,
+                     " pedal_age_ms=%.1f pedal_age_max_ms=%.1f pedal_rtt_ms=%.1f",
+                     age[mid], worst, rtt[mid]);
+        }
+        return buf;
     }
     size_t EventCount() const { return m_logger.Count(); }
 
@@ -348,6 +427,10 @@ private:
         m_latencyNs     = (int64_t)latencyMs * 1000000LL;
         m_pendingCount  = 0;
         m_audioActive   = false;
+
+        // One clock mapping for the whole block, from the first beat laid out
+        // below to the last click. Released when the block ends.
+        if (m_clock) m_clock->Hold(true);
 
         const int64_t leadNs = 700000000LL;   // 0.7 s before the first beat
         const int leadIn = practice ? 0 : kLeadInBeats;
@@ -399,16 +482,42 @@ private:
         }
     }
 
-    void RegisterTap(XrTime tapTime, XrTime frameTime, bool practice) {
-        // lastChangeTime can sit slightly either side of the frame; trust it, but
-        // refuse anything wild.
+    // Everything that tapped this frame: pedal presses first, in the order they
+    // happened, then the controller.
+    void TakeTaps(bool ctrlPressed, XrTime ctrlTime, XrTime frameTime, bool practice) {
+        for (int i = 0; i < m_extCount; i++) {
+            RegisterTap(m_ext[i].time, frameTime, practice,
+                        m_ext[i].timed ? TapSource::Pedal : TapSource::PedalUntimed,
+                        m_ext[i].rttMs);
+        }
+        if (ctrlPressed) RegisterTap(ctrlTime, frameTime, practice, TapSource::Controller, 0.0f);
+    }
+
+    void RegisterTap(XrTime tapTime, XrTime frameTime, bool practice,
+                     TapSource src, float rttMs) {
         XrTime t = tapTime;
-        const int64_t drift = (int64_t)t - (int64_t)frameTime;
-        if (t == 0 || drift > 200000000LL || drift < -200000000LL) t = frameTime;
+        if (src == TapSource::Controller) {
+            // lastChangeTime sits a fixed distance behind the frame; trust it, but
+            // refuse anything wild.
+            const int64_t drift = (int64_t)t - (int64_t)frameTime;
+            if (t == 0 || drift > 200000000LL || drift < -200000000LL) t = frameTime;
+        } else {
+            // A pedal press brings its own time, and when the WiFi stalls that
+            // time can be a long way behind this frame. That is real and is kept,
+            // not snapped to the frame. The one thing it cannot be is ahead of now.
+            if (t == 0 || t > frameTime) t = frameTime;
+        }
 
         if (!practice) {
             m_logger.Record(t, TapLogger::Kind::Tap,
                             m_blockIdx + 1, CurrentLatencyMs(), m_tapsThisBlock, frameTime);
+            m_tapsBySource[(int)src]++;
+            if (src != TapSource::Controller && m_pedalStatCount < kMaxPedalStats) {
+                m_pedalAgeMs[m_pedalStatCount] =
+                    (float)((double)((int64_t)frameTime - (int64_t)t) / 1e6);
+                m_pedalRttMs[m_pedalStatCount] = rttMs;
+                m_pedalStatCount++;
+            }
         }
         m_tapsThisBlock++;
 
@@ -493,6 +602,20 @@ private:
 
     float   m_beatPulse     = 0;
     float   m_feedbackFlash = 0;
+
+    // Pedal presses handed in this frame, waiting for Update() to take them.
+    struct ExtTap { XrTime time; bool timed; float rttMs; };
+    static constexpr int kMaxExt = 8;
+    ExtTap  m_ext[kMaxExt]{};
+    int     m_extCount = 0;
+
+    // Scored taps per source, and per pedal tap how old it was when acted on
+    // and how good the clock was. Summarised in the CSV header.
+    static constexpr int kMaxPedalStats = 512;
+    int     m_tapsBySource[3] = {0, 0, 0};
+    float   m_pedalAgeMs[kMaxPedalStats]{};
+    float   m_pedalRttMs[kMaxPedalStats]{};
+    int     m_pedalStatCount = 0;
 
     TapLogger m_logger;
 };

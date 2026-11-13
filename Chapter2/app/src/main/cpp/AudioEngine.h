@@ -36,7 +36,9 @@ public:
     static constexpr int kVoiceBeat     = 0;   // the metronome
     static constexpr int kVoiceLeadIn   = 1;   // quieter, higher, unscored beats
     static constexpr int kVoiceFeedback = 2;   // response to a tap, delayed
-    static constexpr int kVoiceCount    = 3;
+    static constexpr int kVoiceKick     = 3;   // foot pedal: bass drum thump
+    static constexpr int kVoiceHat      = 4;   // foot pedal: hi-hat closing tick
+    static constexpr int kVoiceCount    = 5;
 
     bool Init() {
         AAudioStreamBuilder *b = nullptr;
@@ -245,13 +247,16 @@ private:
         Voice &vo = m_voice[v];
         vo.on = true;
         vo.n  = 0;
+        int lenDiv = 25;                         // 40 ms unless a voice says otherwise
         switch (v) {
             case kVoiceBeat:     vo.freq = 880.0f;  vo.gain = 0.26f; break;
             case kVoiceLeadIn:   vo.freq = 1320.0f; vo.gain = 0.13f; break;
             case kVoiceFeedback: vo.freq = 523.0f;  vo.gain = 0.20f; break;
+            case kVoiceKick:     vo.freq = 170.0f;  vo.gain = 0.70f; lenDiv = 12; break;   // ~83 ms thump
+            case kVoiceHat:      vo.freq = 2600.0f; vo.gain = 0.16f; lenDiv = 40; break;   // 25 ms tick
             default:             vo.freq = 880.0f;  vo.gain = 0.20f; break;
         }
-        vo.len = m_sampleRate / 25;              // 40 ms
+        vo.len = m_sampleRate / lenDiv;
         m_voiceStart[v] = offsetInBuffer;
     }
 
@@ -262,7 +267,7 @@ private:
     std::atomic<uint32_t> m_writeIndex{0};
     Slot  m_sched[kMaxScheduled];
     Voice m_voice[kVoiceCount];
-    int   m_voiceStart[kVoiceCount]{0, 0, 0};
+    int   m_voiceStart[kVoiceCount]{};
 
     bool    m_haveAnchor = false;
     int64_t m_anchorFrame = 0;

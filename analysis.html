@@ -152,7 +152,7 @@ ul{margin:0;padding-left:18px;color:var(--ink-2);display:flex;flex-direction:col
 
   <div class="masthead">
     <h1>Foot Tap Latency Bench</h1>
-    <span class="sub">CSCI-7420 &middot; alpha</span>
+    <span class="sub">CSCI-7420 &middot; final release</span>
   </div>
 
   <!-- ============ SETUP ============ -->
@@ -754,7 +754,7 @@ function rankPanel(sess){
     var lat = sess.conditionOrder[r.blockNumber - 1];
     html += '<tr><td>' + r.place + (r.place === 1 ? " (most responsive)" : "") + '</td>' +
       '<td>' + r.blockNumber + '</td>' +
-      '<td>' + (lat === undefined ? "&mdash;" : lat + " ms") + '</td></tr>';
+      '<td>' + (lat === undefined ? "n/a" : lat + " ms") + '</td></tr>';
   });
   html += '</tbody></table></div>' +
     '<p class="note">Ranked by block number at the end of the session, then mapped back to ' +
@@ -782,8 +782,10 @@ function overlayPanel(){
   });
   var legend = '<div class="legend">' + LOADED.map(function(s2, i){
     return '<span><i class="swatch" style="background:' + PCOLORS[i % PCOLORS.length] +
-           '"></i>' + s2.participant + '</span>';
+           '"></i>' + s2.participant + (s2.tapSource === "pedal" ? " (pedal)" : "") + '</span>';
   }).join("") + '</div>';
+  var mixed = LOADED.some(function(s2){ return s2.tapSource === "pedal"; }) &&
+              LOADED.some(function(s2){ return s2.tapSource !== "pedal"; });
 
   return '<section class="panel"><h2>All participants</h2>' +
     '<figure>' + lineChart({ series: sdSeries, labels: labels,
@@ -796,7 +798,11 @@ function overlayPanel(){
       aria: "Perceived responsiveness by added latency, per participant",
       fmt: function(v){ return v.toFixed(1); }, min: 1, max: 7 }) +
     '<figcaption><b>Perceived responsiveness (1 to 7), one line per participant.</b>' +
-    '</figcaption></figure>' + legend + '</section>';
+    '</figcaption></figure>' + legend +
+    (mixed ? '<p class="note">These sessions used two different inputs. Spread and ratings can be ' +
+             'read across them. How early each person tapped cannot, because the pedal and the ' +
+             'controller put the tap on the clock in different ways.</p>' : '') +
+    '</section>';
 }
 
 function renderResults(sess){
@@ -841,11 +847,23 @@ function renderResults(sess){
       (sess.audioTimed === null || sess.audioTimed === undefined
         ? tile("Audio out latency", sess.audioOutputLatencyMs.toFixed(1), "ms, corrected")
         : tile("Beat timing", sess.audioTimed ? "sample" : "frame",
-               sess.audioTimed ? "pinned to audio" : "quantised, ~14 ms")) +
+               sess.audioTimed ? "pinned to audio" : "quantised to the frame")) +
+      (sess.tapSource
+        ? tile("Tap input", sess.tapSource,
+               sess.tapSource === "pedal"
+                 ? (sess.pedal && isFinite(sess.pedal.rttMs)
+                     ? "timed at the switch, within " + (sess.pedal.rttMs / 2).toFixed(1) + " ms"
+                     : "timed at the switch")
+                 : sess.tapSource === "controller" ? "timed by the frame" : "both inputs used")
+        : "") +
+      (sess.frameMs
+        ? tile("Display", Math.round(1000 / sess.frameMs) + " Hz", sess.frameMs.toFixed(1) + " ms per frame")
+        : "") +
     '</div>' +
+    inputNote(sess) +
     (sess.audioTimed === false
       ? '<p class="note" style="border-left-color:var(--warn)">This session fell back ' +
-        'to a visual beat, so every beat time carries about 14 ms of display-frame ' +
+        'to a visual beat, so every beat time carries one display frame of ' +
         'quantisation. Treat the curve as indicative and check the audio indicator ' +
         'before the next run.</p>'
       : '') +
@@ -895,13 +913,13 @@ function renderResults(sess){
   CONDITIONS.forEach(function(L){
     var b = byLat[L];
     html += '<tr><td>' + L + ' ms</td>' +
-      '<td>' + (b && isFinite(b.deliveredLatencyMs) ? b.deliveredLatencyMs.toFixed(1) + " ms" : "&mdash;") + '</td>' +
-      '<td>' + (b ? b.position : "&mdash;") + '</td>' +
-      '<td>' + (b ? b.n : "&mdash;") + '</td>' +
-      '<td>' + (b && isFinite(b.meanAsynchronyMs) ? b.meanAsynchronyMs.toFixed(1) : "&mdash;") + '</td>' +
-      '<td>' + (b && isFinite(b.sdAsynchronyMs) ? b.sdAsynchronyMs.toFixed(1) : "&mdash;") + '</td>' +
-      '<td>' + (b && isFinite(b.unmatchedTaps) ? b.unmatchedTaps : "&mdash;") + '</td>' +
-      '<td>' + (b && b.rating ? b.rating : "&mdash;") + '</td></tr>';
+      '<td>' + (b && isFinite(b.deliveredLatencyMs) ? b.deliveredLatencyMs.toFixed(1) + " ms" : "n/a") + '</td>' +
+      '<td>' + (b ? b.position : "n/a") + '</td>' +
+      '<td>' + (b ? b.n : "n/a") + '</td>' +
+      '<td>' + (b && isFinite(b.meanAsynchronyMs) ? b.meanAsynchronyMs.toFixed(1) : "n/a") + '</td>' +
+      '<td>' + (b && isFinite(b.sdAsynchronyMs) ? b.sdAsynchronyMs.toFixed(1) : "n/a") + '</td>' +
+      '<td>' + (b && isFinite(b.unmatchedTaps) ? b.unmatchedTaps : "n/a") + '</td>' +
+      '<td>' + (b && b.rating ? b.rating : "n/a") + '</td></tr>';
   });
   html += '</tbody></table></div>' +
     '<p class="note"><b>Delivered</b> is measured from the log rather than assumed: each feedback ' +
@@ -912,7 +930,7 @@ function renderResults(sess){
     'the beat (Repp, 2005). It is a property of human timing, not a bug in the apparatus.</p>' +
     '<p class="note" style="border-left-color:var(--warn)"><b>Hit rate is no longer reported.</b> ' +
     'It counted taps landing within a fixed window either side of the beat, but this apparatus has ' +
-    'a large uncorrected systematic offset: with mean asynchrony near 160 ms and a 100 ms window, ' +
+    'a large uncorrected systematic offset: with mean asynchrony near 100 ms and a 100 ms window, ' +
     'almost nothing counts as a hit no matter how steadily the participant tapped. The number was ' +
     'measuring the offset, not the performance, so reporting it would have been misleading. Once ' +
     'the offset is measured against outside hardware the window can be centred on it, or on each ' +
@@ -954,6 +972,28 @@ function renderResults(sess){
   };
 }
 
+// One plain sentence on where this session's taps came from and what that does
+// to their timing. The two inputs must not be compared blind.
+function inputNote(sess){
+  if (sess.tapSource === "pedal"){
+    var pd = sess.pedal || {};
+    return '<p class="note">Taps came from the <b>foot pedal</b>. Each press was timed at the switch ' +
+      'on the Pi and carried to the headset with that time on it' +
+      (isFinite(pd.ageMs) ? ', arriving a median of ' + pd.ageMs.toFixed(0) + ' ms later' : '') + '. ' +
+      (isFinite(pd.untimed) ? pd.untimed + ' of ' + pd.taps + ' taps lacked a source timestamp and ' +
+        (isFinite(pd.lost) ? pd.lost : 0) + ' were lost. ' : '') +
+      'Mean asynchrony here is not comparable with a controller session.</p>';
+  }
+  if (sess.tapSource === "controller"){
+    return '<p class="note">Taps came from the <b>floor controller</b>. Its timestamp follows the ' +
+      'display frame and not the press, so tap times are quantised to one frame' +
+      (sess.frameMs ? ' (' + sess.frameMs.toFixed(1) + ' ms here)' : '') +
+      '. That adds about 3 ms to the spread and a constant to the mean. ' +
+      'Mean asynchrony here is not comparable with a pedal session.</p>';
+  }
+  return "";
+}
+
 function tile(k, v, u){
   return '<div class="tile"><span class="k">'+k+'</span><span class="v">'+v+
          '</span><span class="u">'+u+'</span></div>';
@@ -992,6 +1032,10 @@ function saveFile(text, mime, name){
 function parseQuestCSV(text){
   var lines = String(text).split(/\r?\n/);
   var participant = "quest", ioiMs = 600, audioTimed = null, clockExact = null;
+  // Added for the final release. tap_source says whether taps came from the foot
+  // pedal or the floor controller, which are timed differently; frame_ms is the
+  // display's frame period as the headset observed it. Older files have neither.
+  var tapSource = null, frameMs = null, pedal = null;
   var rows = [], i;
 
   for (i = 0; i < lines.length; i++){
@@ -1006,6 +1050,14 @@ function parseQuestCSV(text){
       if (mi) ioiMs = parseInt(mi[1], 10);
       if (ma) audioTimed = (ma[1] === "1");
       if (mc) clockExact = (mc[1] === "1");
+      var mt = ln.match(/tap_source=(\S+)/), mf = ln.match(/frame_ms=([\d.]+)/);
+      if (mt) tapSource = mt[1];
+      if (mf && parseFloat(mf[1]) > 0) frameMs = parseFloat(mf[1]);
+      if (/pedal_taps=/.test(ln)){
+        var num = function(key){ var m = ln.match(new RegExp(key + "=([\\d.]+)")); return m ? parseFloat(m[1]) : NaN; };
+        pedal = { taps: num("pedal_taps"), untimed: num("pedal_untimed"), lost: num("pedal_lost"),
+                  recovered: num("pedal_recovered"), ageMs: num("pedal_age_ms"), rttMs: num("pedal_rtt_ms") };
+      }
       continue;
     }
     if (ln.indexOf("event,") === 0) continue;       // header
@@ -1016,10 +1068,33 @@ function parseQuestCSV(text){
       t:    parseFloat(p[1]),
       block:parseInt(p[2], 10),
       lat:  parseInt(p[3], 10),
-      idx:  parseInt(p[4], 10)
+      idx:  parseInt(p[4], 10),
+      src:  p.length > 5 ? parseFloat(p[5]) : NaN
     });
   }
   if (!rows.length) throw new Error("no rows");
+
+  // A file from before the final release does not say where its taps came from
+  // or what the frame period was. The taps were the controller, because nothing
+  // else existed. The frame period can still be read off the file: the last
+  // column is the display time of the frame that handled each event, so the
+  // smallest gap between two of them is one frame.
+  if (!tapSource) tapSource = "controller";
+  if (!frameMs){
+    var seen = {}, ft = [];
+    rows.forEach(function(r){
+      if ((r.kind === "tap" || r.kind === "beat" || r.kind === "feedback") && r.src > 0 && !seen[r.src]){
+        seen[r.src] = 1; ft.push(r.src);
+      }
+    });
+    ft.sort(function(a,b){ return a-b; });
+    var gap = Infinity;
+    for (i = 1; i < ft.length; i++){
+      var g = (ft[i] - ft[i-1]) / 1e6;
+      if (g > 1 && g < gap) gap = g;
+    }
+    if (isFinite(gap) && gap < 40) frameMs = +gap.toFixed(2);
+  }
 
   // The questionnaires live outside the block structure: tlx carries its
   // dimension in `block`, rank carries its place in `block`, so neither can be
@@ -1109,7 +1184,8 @@ function parseQuestCSV(text){
     bpm: Math.round(60000 / ioiMs), ioi: ioiMs,
     scoredTapsPerBlock: blocks.length ? blocks[0].n : 0,
     hitWindowMs: S.hitWin, leadInBeats: 4,
-    feedbackMode: "quest", inputMode: "controller",
+    feedbackMode: "quest", inputMode: tapSource,
+    tapSource: tapSource, frameMs: frameMs, pedal: pedal,
     audioTimed: audioTimed, clockExact: clockExact,
     audioOutputLatencyMs: 0,
     conditionOrder: blocks.map(function(b){ return b.latency; }),

@@ -36,10 +36,17 @@ public:
         return true;
     }
 
+    // Freeze the fallback offset. The experiment holds it for the length of a
+    // block, so every beat, tap and click inside that block is converted with one
+    // and the same number. The real relation between the two clocks does not
+    // move; only this per-frame estimate of it wobbles, and a wobble between the
+    // start of a block and a tap inside it would land straight in the asynchrony.
+    void Hold(bool on) { m_hold = on; }
+
     // Call once per frame with the frame's predictedDisplayTime. Keeps the
-    // fallback offset honest; a no-op on the exact path.
+    // fallback offset honest; a no-op on the exact path and while held.
     void Calibrate(XrTime frameTime) {
-        if (m_exact) return;
+        if (m_exact || (m_hold && m_haveOffset)) return;
         struct timespec ts{};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         const int64_t mono = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
@@ -84,6 +91,7 @@ private:
     XrInstance m_instance = XR_NULL_HANDLE;
     bool    m_exact      = false;
     bool    m_haveOffset = false;
+    bool    m_hold       = false;
     int64_t m_offsetNs   = 0;
 
 #ifdef XR_KHR_convert_timespec_time

@@ -32,10 +32,12 @@ FetchContent_MakeAvailable(OpenXR)
 # Files
 set(SOURCES
         "app/src/main/cpp/main.cpp"
+        "app/src/main/cpp/network/PedalReceiver.cpp"
         "../Common/GraphicsAPI.cpp"
         "../Common/GraphicsAPI_Vulkan.cpp"
         "../Common/OpenXRDebugUtils.cpp")
 set(HEADERS
+        "app/src/main/cpp/network/PedalReceiver.h"
         "app/src/main/cpp/HandPointer.h"
         "app/src/main/cpp/TextRenderer.h"
         "app/src/main/cpp/TapLogger.h"

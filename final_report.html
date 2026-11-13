@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Latency Tolerance for Foot-Based Interaction in Virtual Reality</title>
+<style>
+:root {
+  --surface: #fcfcfb; --surface-2: #f4f4f1; --ink: #1b1b1a; --ink-2: #55544e;
+  --ink-3: #85837a; --rule: #dcdbd4; --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --accent: #2a78d6;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #1a1a19; --surface-2: #232321; --ink: #f0efec; --ink-2: #c3c2b7;
+    --ink-3: #8f8e84; --rule: #35352f; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  --surface: #1a1a19; --surface-2: #232321; --ink: #f0efec; --ink-2: #c3c2b7;
+  --ink-3: #8f8e84; --rule: #35352f; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --accent: #3987e5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--surface); color: var(--ink);
+  font: 16px/1.65 Georgia, "Iowan Old Style", "Times New Roman", serif;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 44rem; margin: 0 auto; padding: 4rem 16px 6rem; }
+h1 { font-size: 1.9rem; line-height: 1.22; margin: 0 0 .6rem; letter-spacing: -.01em; }
+h2 { font-size: 1.18rem; margin: 2.6rem 0 .7rem; letter-spacing: -.005em;
+     padding-bottom: .3rem; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 1rem; margin: 1.7rem 0 .4rem; color: var(--ink); }
+p { margin: 0 0 1rem; }
+.byline { color: var(--ink-2); font-size: .95rem; margin-bottom: .2rem; }
+.meta { color: var(--ink-3); font-size: .88rem; }
+.rule { height: 1px; background: var(--rule); margin: 1.8rem 0 0; }
+.abstract { background: var(--surface-2); border-left: 3px solid var(--accent);
+  padding: 1rem 1.2rem; margin: 2rem 0; font-size: .95rem; }
+.abstract p:last-child { margin-bottom: 0; }
+.links { background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 1rem 1.2rem; margin: 1.6rem 0; font-size: .92rem;
+  font-family: system-ui, -apple-system, sans-serif; }
+.links div { margin: .32rem 0; }
+.links b { display: inline-block; min-width: 9.5rem; color: var(--ink-2); font-weight: 600; }
+a { color: var(--accent); }
+figure { margin: 1.8rem 0; }
+figcaption { font-size: .86rem; color: var(--ink-2); margin-top: .55rem; line-height: 1.5;
+  font-family: system-ui, -apple-system, sans-serif; }
+figcaption b { color: var(--ink); }
+svg { width: 100%; height: auto; display: block;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+.grid { stroke: var(--rule); stroke-width: 1; }
+.tick { fill: var(--ink-3); font: 11px var(--mono); }
+.axlab { fill: var(--ink-2); font: 11.5px system-ui, sans-serif; }
+.dlabel { fill: var(--ink-2); font: 600 12px system-ui, sans-serif; }
+.blab { fill: var(--ink-3); font: 10.5px var(--mono); }
+.legend { display: flex; gap: 1.2rem; margin: .6rem 0 0; font-size: .86rem;
+  color: var(--ink-2); font-family: system-ui, sans-serif; }
+.legend span { display: inline-flex; align-items: center; gap: .4rem; }
+.sw { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+table { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .88rem;
+  font-family: system-ui, -apple-system, sans-serif; }
+th, td { text-align: left; padding: .42rem .5rem; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; color: var(--ink-2); font-size: .8rem; letter-spacing: .02em;
+  text-transform: uppercase; background: var(--surface-2); }
+td { font-variant-numeric: tabular-nums; }
+caption { caption-side: bottom; text-align: left; font-size: .84rem; color: var(--ink-2);
+  padding-top: .5rem; line-height: 1.5; }
+code { font: .88em var(--mono); background: var(--surface-2); padding: .1em .35em;
+  border-radius: 3px; }
+.tw { overflow-x: auto; }
+.refs { font-size: .9rem; }
+.refs li { margin-bottom: .55rem; }
+ul, ol { padding-left: 1.3rem; }
+li { margin-bottom: .35rem; }
+.note { font-size: .9rem; color: var(--ink-2); border-left: 2px solid var(--rule);
+  padding-left: .9rem; margin: 1.1rem 0; }
+@media print {
+  .wrap { max-width: none; padding: 0; }
+  h2 { page-break-after: avoid; } figure { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>How Much Lag Can Foot Input Tolerate? Measuring Latency Thresholds for
+Foot-Based Interaction in Virtual Reality</h1>
+<p class="byline">Justin Hardee</p>
+<p class="meta">CSCI-7420 Human-Computer Interaction, Fall 2026 &middot; Augusta University<br>
+Instructor: Jieqiong Zhao &middot; Final Release, 15 November 2026</p>
+<div class="rule"></div>
+
+<div class="links">
+<div><b>Demo video</b> <a href="VIDEO_LINK_HERE">VIDEO_LINK_HERE</a></div>
+<div><b>Source code</b> <a href="https://github.com/neogrammer/foor-tap-latency">github.com/neogrammer/foor-tap-latency</a></div>
+<div><b>Live analysis tool</b> <a href="https://neogrammer.github.io/foor-tap-latency/analysis.html">neogrammer.github.io/foor-tap-latency/analysis.html</a></div>
+<div><b>Executable</b> <a href="https://github.com/neogrammer/foor-tap-latency/raw/tt/app-debug.apk"><code>app-debug.apk</code></a>, at the top of the repository</div>
+</div>
+
+<div class="abstract">
+<p><b>Abstract.</b> Latency thresholds are well established for hand input and for
+whole-body interaction in virtual reality, but not for the foot, despite the foot
+being used increasingly as a secondary input channel. This project built a
+measurement instrument for that question: a Meta Quest 3 application in which a
+participant taps a floor-mounted switch in time with a metronome while the system
+inserts a controlled delay between the tap and its confirmation. Five delays were
+intended (0, 50, 100, 200, 400&nbsp;ms) and two measures were taken per block, the
+spread of tap-to-beat asynchrony and a self-reported responsiveness rating, plus
+NASA-TLX and a preference ranking at the end of each session. Three participants
+completed full sessions, 887 scored taps in total: two on a hand
+controller laid on the floor, and a third on the foot pedal that the final release
+introduces. The first result concerns the
+instrument rather than the participants: once the system was made to report the
+latency it actually delivered rather than the latency it requested, the 0&nbsp;ms and
+50&nbsp;ms conditions were both found to deliver approximately 63&nbsp;ms, the floor
+imposed by the audio output buffer, and the pedal session reproduced that floor at
+62&nbsp;ms on different input hardware. The design therefore resolves four distinct
+levels, not five, and the region below the floor is not addressable by this
+apparatus. Within those four levels, two of the three participants rated
+responsiveness sharply lower at 200&nbsp;ms and above, one of them with timing
+precision degrading in step, while the third showed no sensitivity to the
+manipulation; no degradation threshold could be fitted with confidence at this
+sample size. Returning to the session logs for the final release exposed two
+further properties of the original apparatus: the display rate was not the
+72&nbsp;Hz that had been assumed but whatever the headset chose on the day, and
+the controller's tap timestamp was locked to the display frame rather than marking
+the moment of the press. The final release therefore replaces the floor
+controller with a foot pedal that is timestamped at the switch and synchronised to
+the headset's clock, and that recovered press times to within about 2&nbsp;ms in
+bench tests across a deliberately degraded network. The contribution is the
+instrument, its characterisation, and a method for reporting latency honestly in
+the presence of an uncalibrated pipeline.</p>
+</div>
+
+<h2>1. Introduction</h2>
+
+<p>End-to-end latency is one of the oldest known determinants of interactive
+performance. MacKenzie and Ware demonstrated in 1993 that lag degrades pointing
+throughput in a way that behaves like reduced target size, and the effect has been
+replicated across input devices and display technologies since. In virtual reality
+the question has been pursued aggressively, because the consequences extend beyond
+throughput to presence and to simulator sickness. Friston and colleagues placed the
+lower bound on noticeable latency for hand-based pointing and steering near
+16&nbsp;ms; Waltemate and colleagues reported a threshold near 75&nbsp;ms for
+closed-loop whole-body interaction.</p>
+
+<p>The foot has been studied as a virtual reality input channel, but largely in
+terms of what it can accomplish rather than how fast it must be served. Work on
+foot-based text entry and on foot interaction for secondary tasks establishes that
+the foot is viable as an input channel while the hands are occupied. What is
+missing is the figure a designer would actually need: how much delay can be
+inserted between a foot action and its system response before timing performance
+degrades, and before the user notices. Hand and whole-body numbers are not
+obviously transferable. The foot is slower and coarser than the hand but is also
+used differently, and the motor loop that controls it is not the same one.</p>
+
+<p>This project asked three questions:</p>
+<ul>
+<li><b>RQ1.</b> At what added latency does foot timing performance measurably
+degrade?</li>
+<li><b>RQ2.</b> At what added latency do users report noticing the lag?</li>
+<li><b>RQ3.</b> What is the gap between those two points?</li>
+</ul>
+
+<p>RQ3 is the question with design consequences. If performance degrades well
+before anyone notices, a system can be unresponsive in ways its users cannot
+articulate. If the reverse holds, complaints arrive before any measurable cost.</p>
+
+<p>The work reported here is a pilot conducted as a course project. It does not
+produce a threshold, and a substantial part of what it did produce is a finding
+about the measuring instrument rather than about feet. That outcome is reported in
+full, because the instrument's floor is precisely the kind of limitation that is
+easy to leave unstated and that would invalidate any threshold claimed on top of
+it.</p>
+
+<h2>2. Related work</h2>
+
+<h3>Latency and performance</h3>
+<p>MacKenzie and Ware [4] established the canonical result that lag degrades
+pointing performance systematically and that its effect is multiplicative with task
+difficulty. Their experimental logic, varying a controlled delay across blocks and
+measuring a performance index per block, is the structure this study follows.</p>
+
+<p>Friston, Karlstr&ouml;m and Steed [2] examined very low latencies in virtual
+reality and found effects on pointing and steering down to approximately
+16&nbsp;ms, which is below the frame interval of most consumer headsets. Waltemate
+and colleagues [6] studied closed-loop whole-body interaction and reported both
+perceptual and motor effects, with a threshold around 75&nbsp;ms. Those two figures
+bracket the range this study intended to probe. As Section 5 reports, the apparatus
+built here cannot resolve most of that range.</p>
+
+<h3>Sensorimotor synchronisation</h3>
+<p>The task used here, tapping in time with an isochronous auditory metronome, is
+one of the most studied paradigms in motor timing. Repp's review [5] documents two
+properties this study depends on. First, people tap slightly <i>before</i> the beat
+rather than on it, a robust effect termed negative mean asynchrony, typically
+between 20 and 80&nbsp;ms and varying considerably between individuals and with
+musical training. Second, the standard deviation of asynchrony is the conventional
+measure of timing precision and is more informative than mean error, because it is
+insensitive to a constant offset. That second property is what makes the measure
+usable here despite an uncalibrated pipeline.</p>
+
+<h3>Timing validity in experiment software</h3>
+<p>Bridges, Pitiot, MacAskill and Peirce [1] measured the timing accuracy of a
+range of experiment generators and reached a conclusion that shaped this project's
+engineering: platform-reported timing figures are best-case, and every setup should
+be validated against external hardware rather than trusted. Their finding is the
+direct reason this report treats its own latency figures as provisional and devotes
+Section 5.1 to what the apparatus actually delivers rather than what it requests.</p>
+
+<h3>Workload measurement</h3>
+<p>NASA-TLX [3] is used here in a reduced form to capture subjective workload at
+the end of each session. The deviations from the published instrument are stated in
+Section 4.4.</p>
+
+<h2>3. System</h2>
+
+<p>The system is two programs with a data file between them. A native application
+on the Meta Quest 3 runs the experiment and writes an event log; a self-contained
+browser page reads that log and performs all analysis. No statistic is computed on
+the headset. This separation was deliberate: a mistake in the pairing rule or in a
+derived measure is then a change to an HTML file rather than a reason to recall a
+participant.</p>
+
+<h3>3.1 Apparatus</h3>
+<p>The headset application is written in C++ against OpenXR with a Vulkan renderer,
+built on the Khronos OpenXR tutorial scaffold. It accepts a tap from either of two
+inputs. Two of the three sessions reported in Section&nbsp;5 used a hand controller
+lying flat on the floor and tapped with the foot; the tap action is bound to most buttons on both
+controllers, because a foot cannot aim, and the floor unit is distinguished from
+any hand-held unit at the point the action is read rather than in the binding. The
+final release adds a foot pedal as the primary input, used for the third session,
+and keeps the controller as a fallback. The pedal is a momentary foot switch wired to an input pin of a Raspberry
+Pi&nbsp;5, which timestamps each press and sends it to the headset over the local
+wireless network. Its design is set out in Section&nbsp;3.4, after the timing
+architecture it has to fit into, and the reasons for it are a result of this
+project (Section&nbsp;5.7).</p>
+
+<p>Because no controller is held in the hand, the interface is driven by hand
+tracking. Pointing a finger moves a cursor on a floating panel and holding it on a
+target for one second activates it. An earlier pinch-based selection was abandoned:
+the aim ray runs through the index finger, pinching curls that finger, and the ray
+therefore swings away at the moment of selection. Dwell removes the cause rather
+than compensating for it, and the finger never leaves the pointing pose. Hand
+tracking is used for menus only and never for anything timed, since it is
+camera-based and slower than a controller.</p>
+
+<h3>3.2 Timing architecture</h3>
+<p>The entire study reduces to one subtraction: the time a foot landed minus the
+time its beat occurred. A display frame lasts 11.1 or 13.9&nbsp;ms, depending on a
+refresh rate the headset chooses (Section&nbsp;5.7), and the smallest intended
+delay was 50&nbsp;ms. Working at frame resolution would have spent a fifth or more
+of that condition on rounding before the participant moved. Three choices were made to keep both ends of the
+subtraction finer than a frame:</p>
+
+<ol>
+<li>The metronome click is scheduled at an exact audio sample. The Android AAudio
+interface returns a matched pair of audio frame position and system clock time, so
+the arrival time of a future sample is known before it occurs. Each beat is logged
+at the time it will be <i>heard</i>, not at the frame on which something was drawn.</li>
+<li>The tap time is read from <code>XrActionStateBoolean::lastChangeTime</code>, on
+the understanding that this is the runtime's own record of when the button state
+changed rather than the frame on which the change was noticed. Section&nbsp;5.7
+shows that this understanding does not hold on this runtime, and Section&nbsp;3.4
+describes the input that replaces it.</li>
+<li>The confirmation click is scheduled by the same sample-accurate mechanism as
+the metronome, and the time at which it was actually scheduled is logged.</li>
+</ol>
+
+<p>That third point is the one that produced the principal finding and is developed
+in Section 5.1.</p>
+
+<h3>3.3 Analysis tool</h3>
+<p>The analysis page pairs each tap with at most one beat. Every candidate pair
+within half an inter-onset interval is scored by absolute distance and consumed
+closest-first, so no beat can be credited to two taps and unmatched taps are
+reported rather than absorbed. It derives the delivered latency per block from the
+logged confirmation events, fits a flat-then-turning curve to each measure, and
+plots participants as separate series. The threshold fit reports a breakpoint only
+when its residual error is at least twice as good as the next candidate; otherwise
+it reports that no breakpoint is separable. The tool is linked at the top of this
+report and runs on the session files in the repository.</p>
+
+<h3>3.4 Pedal input and clock synchronisation</h3>
+<p>The pedal exists to put a trustworthy time on the press. A packet's arrival at
+the headset is not that time: the wireless hop adds several milliseconds, and a
+different number each time. The design therefore reads the time at the switch and
+carries it in the packet.</p>
+
+<ul>
+<li><b>The press is stamped at the pin.</b> The relay on the Pi uses the Linux
+kernel's own timestamp for the edge, so the interval before user code is told about
+it (measured at 0.6 to
+0.7&nbsp;ms on this Pi) is excluded from the
+measurement.</li>
+<li><b>Debounce does not move the time.</b> A press is accepted once the contact
+has held for 3&nbsp;ms, which rejects electrical spikes on a two-metre cable, but
+the time reported is that of the first edge. A release must hold for 15&nbsp;ms, so
+a contact chattering under a resting foot is not counted as a second tap.</li>
+<li><b>The two clocks are related by measurement.</b> Twenty times a second the
+headset sends a probe carrying its own send time, and the Pi replies with the time
+the probe arrived and the time the reply left. The four timestamps give the offset
+between the clocks and the round-trip time. The offset from the fastest round trip
+in the last three seconds is used, since a fast exchange has the least room for
+asymmetry, and half of that round trip bounds the error of the result.</li>
+<li><b>The same probes find the pedal.</b> They are broadcast until a relay
+answers, so no network address is configured on either device and the apparatus can
+move to another network unchanged. They also keep the headset's radio from entering
+power save between taps, which would otherwise hold a packet until its next
+wake-up.</li>
+<li><b>A lost packet does not lose a tap.</b> Each press is sent twice, 3&nbsp;ms
+apart, and the most recent press is repeated inside every later packet. Sequence
+numbers remove the duplicates and reveal any press that never arrived.</li>
+<li><b>One time base.</b> The pedal press, the metronome beat and the confirmation
+click all pass through the same conversion from the system clock to the runtime
+clock. Whatever constant error that conversion carries (Section&nbsp;5.7) is then
+common to all three and cancels in both the asynchrony and the delivered latency.
+The conversion is also held fixed for the duration of each block.</li>
+<li><b>Nothing else answers the pedal.</b> During a block the application gives no
+visual or auditory response to a press other than the delayed confirmation. An
+immediate indicator would supply exactly the zero-latency feedback the study
+withholds.</li>
+</ul>
+
+<p>The session log records which input produced the taps, how many pedal taps
+lacked a source timestamp, the median time between a press and the frame that acted
+on it, the median round trip behind the clock offset, any presses lost or
+reconstructed, and the frame period actually observed. The intent is the one
+Section&nbsp;5.1 arrives at: the instrument reports what it did.</p>
+
+<h2>4. Method</h2>
+
+<h3>4.1 Task</h3>
+<p>The participant stands in a minimal virtual room. An auditory metronome sounds
+at a fixed interval of 600&nbsp;ms, accompanied by a visual pulse. The participant
+taps the floor switch with one foot in time with the metronome. After each tap the
+system waits a predetermined interval and then confirms the tap with an audible
+click and a flash of the floor pad. The metronome itself is never delayed.</p>
+
+<h3>4.2 Design</h3>
+<p>A within-subjects design with five intended delay conditions: 0, 50, 100, 200
+and 400&nbsp;ms. These were chosen to bracket the published figures, spanning
+Friston's 16&nbsp;ms lower bound and Waltemate's 75&nbsp;ms whole-body threshold.
+Each block comprises four unscored lead-in beats followed by 60 scored taps. A
+practice block at zero delay precedes the scored blocks and is not recorded.</p>
+
+<p>Condition order was counterbalanced by rotating a cyclic square keyed to the
+participant number, so each participant received a different order
+(Table&nbsp;1). This
+balances serial position but not first-order carryover; a Williams design is the
+correct structure and is identified as future work.</p>
+
+<h3>4.3 Measures</h3>
+<ul>
+<li><b>Asynchrony.</b> The signed interval between each tap and its paired beat,
+negative when the tap precedes the beat.</li>
+<li><b>Precision.</b> The sample standard deviation of asynchrony within a block.
+This is
+the primary performance measure for RQ1, and it is insensitive to any constant
+offset in the pipeline.</li>
+<li><b>Perceived responsiveness.</b> A 1 to 7 rating collected after every block,
+anchored LAGGY at 1 and INSTANT at 7. This is the measure for RQ2.</li>
+<li><b>Workload.</b> NASA-TLX at the end of the session.</li>
+<li><b>Preference.</b> A forced ranking of the five blocks from most to least
+responsive, collected after the workload questions.</li>
+</ul>
+
+<p>Hit rate within a fixed window was collected during earlier milestones and has
+been withdrawn. With mean asynchrony near 100&nbsp;ms and a window of
+&plusmn;100&nbsp;ms, almost no tap counted as a hit regardless of how steadily a
+participant tapped: the measure was describing the pipeline's constant offset
+rather than the participant's performance. It can be restored once the offset is
+measured, by centring the window on it.</p>
+
+<h3>4.4 Deviations from published instruments</h3>
+<p>NASA-TLX is administered here as six unweighted items on a 1 to 7 scale rather
+than the published 21-point weighted instrument. The constraint is the renderer:
+text in this application is drawn by composing letterforms from rotated cuboids,
+and a 21-point response row does not fit beside its anchor labels. The reduced form
+supports comparison between participants but does not yield a standard TLX score.
+The Performance item retains the original good-to-poor direction and is therefore
+reverse-scored relative to the other five.</p>
+
+<h3>4.5 Participants and procedure</h3>
+<p>Three adults completed full sessions. This is a course project rather than human
+subjects research, and the instructor confirmed that two participants was the
+expected scale; no IRB review was required or sought. P01 and P02 were run on
+18&nbsp;October 2026 with the floor controller. P03 was run on 13&nbsp;November
+2026 with the foot pedal. None of the three was told what was being manipulated. The instruction
+given was to tap in time with the beat as accurately as possible and to answer the
+questions between blocks. Measured from the start of the first scored block to the
+final ranking, the sessions lasted 5.3, 10.9 and 5.5&nbsp;minutes, preceded in each
+case by an unrecorded practice block.</p>
+
+<p>All three sessions ran with audio sample-accurate scheduling active
+(<code>audio_timed=1</code>) and with the clock-conversion extension unavailable
+(<code>clock_exact=0</code>); the consequence is discussed in Section 6.3. The two
+controller sessions ran at a display rate of 90&nbsp;Hz and the pedal session at
+72&nbsp;Hz. The application requests no rate, and the difference was found only in
+the logs (Section&nbsp;5.7).</p>
+
+<h2>5. Results</h2>
+
+<h3>5.1 The apparatus has a floor of approximately 63&nbsp;ms</h3>
+
+<p>The first result concerns the instrument. During pilot testing a participant
+reported that two of the five blocks produced no confirmation sound at all, and
+articulated why it mattered more clearly than the design had: without the
+confirmation there is nothing against which to judge the delay, so the baseline
+condition ceases to function as a baseline.</p>
+
+<p>The cause was in the click scheduler. A confirmation is scheduled for the moment
+of the tap plus the condition delay. At 0&nbsp;ms that moment has already passed by
+the time the audio thread reads the queue, and the scheduler discarded any click
+whose target frame lay behind the write head, which is correct behaviour for a
+metronome scheduled well in advance and silently wrong for tap feedback. The
+scheduler was changed to clamp a late click forward to the earliest frame the
+stream can produce, to return the frame it actually used, and to log the real
+delivery time.</p>
+
+<p>That change converted a silent failure into a measurement. Across both
+controller sessions the 0&nbsp;ms and 50&nbsp;ms conditions both delivered approximately 63&nbsp;ms
+(Table&nbsp;1): 63.0 and 63.3&nbsp;ms for P01, 62.9 and 63.0&nbsp;ms for P02. This
+is the floor imposed by the audio output buffer, and it was present throughout the
+project while being invisible to it. Section&nbsp;5.7 refines what the figure of
+63&nbsp;ms corresponds to physically; the equivalence of the two conditions does
+not depend on that refinement.</p>
+
+<p>The pedal session reproduces the finding on different input hardware and in a
+different time base. P03's 0&nbsp;ms and 50&nbsp;ms conditions delivered medians of
+62.4 and
+61.8&nbsp;ms, and no confirmation in the
+50&nbsp;ms block arrived sooner than
+53&nbsp;ms. On the pedal the floor is no longer a
+single value. A press has to cross a wireless link before its confirmation can be
+scheduled, so the delivered latency in those two blocks ranged from 53 to
+82&nbsp;ms from tap to tap, with one press held to 136&nbsp;ms by a stalled packet,
+where the controller sessions logged the same figure every time. Above the floor
+the pedal session delivered exactly 100, 200 and 400&nbsp;ms on every tap.</p>
+
+<p>Two consequences follow. First, the design resolves four distinct levels rather
+than five, since the two shortest conditions are the same stimulus. Second, and
+more seriously for the original question, the range below 63&nbsp;ms is not
+addressable by this apparatus at all, and that range contains Friston's
+16&nbsp;ms bound and most of the interval up to Waltemate's 75&nbsp;ms threshold.
+The study as designed could not have answered its own question, and the only reason
+this is known is that the instrument was made to report what it delivered instead
+of what it was asked for.</p>
+
+<div class="tw"><table>
+<caption><b>Table 1.</b> Per-block results in presentation order. Delivered latency
+is the median measured from the logged confirmation events, not assumed. The two
+shortest conditions converge at the pipeline floor in all three sessions. P01 and
+P02 used the floor controller and P03 the foot pedal, so mean asynchrony is not
+comparable between them (Section&nbsp;5.7).</caption>
+<thead><tr><th>Block</th><th>Requested</th><th>Delivered</th><th>Taps</th>
+<th>Mean async</th><th>SD async</th><th>Rating</th></tr></thead>
+<tbody>
+<tr><td colspan="7" style="background:var(--surface-2);font-weight:600">P01</td></tr>
+<tr><td>1</td><td>50</td><td>63</td><td>60</td><td>-98.3</td><td>33.9</td><td>6</td></tr>
+<tr><td>2</td><td>100</td><td>100</td><td>60</td><td>-96.4</td><td>41.2</td><td>5</td></tr>
+<tr><td>3</td><td>200</td><td>200</td><td>59</td><td>-118.8</td><td>62.4</td><td>3</td></tr>
+<tr><td>4</td><td>400</td><td>400</td><td>56</td><td>-111.8</td><td>76.1</td><td>1</td></tr>
+<tr><td>5</td><td>0</td><td>63</td><td>58</td><td>-123.3</td><td>40.4</td><td>6</td></tr>
+<tr><td colspan="7" style="background:var(--surface-2);font-weight:600">P02</td></tr>
+<tr><td>1</td><td>100</td><td>100</td><td>59</td><td>-56.6</td><td>108.9</td><td>5</td></tr>
+<tr><td>2</td><td>200</td><td>200</td><td>60</td><td>-50.6</td><td>80.6</td><td>7</td></tr>
+<tr><td>3</td><td>400</td><td>400</td><td>59</td><td>-37.5</td><td>93.9</td><td>6</td></tr>
+<tr><td>4</td><td>0</td><td>63</td><td>59</td><td>-68.9</td><td>57.6</td><td>6</td></tr>
+<tr><td>5</td><td>50</td><td>63</td><td>57</td><td>-46.4</td><td>76.4</td><td>7</td></tr>
+<tr><td colspan="7" style="background:var(--surface-2);font-weight:600">P03 (foot pedal)</td></tr>
+<tr><td>1</td><td>200</td><td>200</td><td>60</td><td>-116.9</td><td>63.8</td><td>3</td></tr>
+<tr><td>2</td><td>400</td><td>400</td><td>60</td><td>-81.0</td><td>46.9</td><td>2</td></tr>
+<tr><td>3</td><td>0</td><td>62</td><td>60</td><td>-135.0</td><td>34.5</td><td>6</td></tr>
+<tr><td>4</td><td>50</td><td>62</td><td>60</td><td>-112.2</td><td>31.4</td><td>7</td></tr>
+<tr><td>5</td><td>100</td><td>100</td><td>60</td><td>-108.0</td><td>23.0</td><td>7</td></tr>
+</tbody></table></div>
+
+<h3>5.2 Timing precision</h3>
+
+<p>Grouping by delivered latency, and pooling the two blocks that landed at the
+floor, gives four levels per participant (Figure&nbsp;1).</p>
+
+<figure>
+<svg viewBox="0 0 660 300" role="img" aria-label="Standard deviation of asynchrony by delivered latency">
+<line x1="64" y1="248.0" x2="542" y2="248.0" class="grid"/>
+<text x="54" y="252.0" class="tick" text-anchor="end">0</text>
+<line x1="64" y1="191.5" x2="542" y2="191.5" class="grid"/>
+<text x="54" y="195.5" class="tick" text-anchor="end">30</text>
+<line x1="64" y1="135.0" x2="542" y2="135.0" class="grid"/>
+<text x="54" y="139.0" class="tick" text-anchor="end">60</text>
+<line x1="64" y1="78.5" x2="542" y2="78.5" class="grid"/>
+<text x="54" y="82.5" class="tick" text-anchor="end">90</text>
+<line x1="64" y1="22.0" x2="542" y2="22.0" class="grid"/>
+<text x="54" y="26.0" class="tick" text-anchor="end">120</text>
+<text x="64.0" y="270" class="tick" text-anchor="middle">63</text>
+<text x="116.5" y="270" class="tick" text-anchor="middle">100</text>
+<text x="258.3" y="270" class="tick" text-anchor="middle">200</text>
+<text x="542.0" y="270" class="tick" text-anchor="middle">400</text>
+<text x="303.0" y="292" class="axlab" text-anchor="middle">Delivered latency (ms)</text>
+<text transform="translate(16,135.0) rotate(-90)" class="axlab" text-anchor="middle">SD of asynchrony (ms)</text>
+<path d="M64.0 178.0 L116.5 170.4 L258.3 130.5 L542.0 104.7" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="64.0" cy="178.0" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 63 ms: 37</title></circle>
+<circle cx="116.5" cy="170.4" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 100 ms: 41</title></circle>
+<circle cx="258.3" cy="130.5" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 200 ms: 62</title></circle>
+<circle cx="542.0" cy="104.7" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 400 ms: 76</title></circle>
+<text x="554.0" y="108.7" class="dlabel">P01</text>
+<path d="M64.0 121.8 L116.5 42.9 L258.3 96.2 L542.0 71.2" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="64.0" cy="121.8" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 63 ms: 67</title></circle>
+<circle cx="116.5" cy="42.9" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 100 ms: 109</title></circle>
+<circle cx="258.3" cy="96.2" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 200 ms: 81</title></circle>
+<circle cx="542.0" cy="71.2" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 400 ms: 94</title></circle>
+<text x="554.0" y="75.2" class="dlabel">P02</text>
+<path d="M64.0 185.9 L116.5 204.7 L258.3 127.8 L542.0 159.7" fill="none" stroke="var(--s3)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="7 5"/>
+<circle cx="64.0" cy="185.9" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 63 ms: 33</title></circle>
+<circle cx="116.5" cy="204.7" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 100 ms: 23</title></circle>
+<circle cx="258.3" cy="127.8" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 200 ms: 64</title></circle>
+<circle cx="542.0" cy="159.7" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 400 ms: 47</title></circle>
+<text x="554.0" y="163.7" class="dlabel">P03, pedal</text>
+</svg>
+<div class="legend">
+<span><i class="sw" style="background:var(--s1)"></i>P01</span>
+<span><i class="sw" style="background:var(--s2)"></i>P02</span>
+<span><i class="sw" style="background:var(--s3)"></i>P03, pedal</span>
+</div>
+<figcaption><b>Figure 1. Timing precision against delivered latency.</b> Lower is
+better. P01 rises monotonically from 37&nbsp;ms at the floor
+to 76&nbsp;ms at 400&nbsp;ms, a doubling. P02 is less precise overall and non-monotonic, with the
+worst value at 100&nbsp;ms. P03, on the pedal and drawn dashed, is most precise at
+100&nbsp;ms and least at 200&nbsp;ms. Participants are plotted separately rather
+than averaged: at this sample size a mean would describe none of them.</figcaption>
+</figure>
+
+<p>P01's precision degrades monotonically with delivered latency, from
+37.1&nbsp;ms at the floor through 41.2,
+62.4 and 76.1&nbsp;ms. P02 shows no such
+ordering. Their worst block, 108.9&nbsp;ms, occurred at 100&nbsp;ms of
+delay, which was also the
+first scored block of their session; a practice effect is the most parsimonious
+explanation and is indistinguishable from a condition effect with one participant.</p>
+
+<p>P03's precision is worse at 200 and 400&nbsp;ms (63.8 and
+46.9&nbsp;ms) than at the three shorter conditions
+(34.5, 31.4 and 23.0&nbsp;ms), which
+taken alone would
+read as an effect of delay. It cannot be read that way. P03's order placed 200 and
+400&nbsp;ms first, and their precision improved with every successive block of the
+session, so delay and practice are completely confounded. Two of the three
+participants produced their least precise block first.</p>
+
+<h3>5.3 Perceived responsiveness</h3>
+
+<figure>
+<svg viewBox="0 0 660 300" role="img" aria-label="Perceived responsiveness by delivered latency">
+<line x1="64" y1="248.0" x2="542" y2="248.0" class="grid"/>
+<text x="54" y="252.0" class="tick" text-anchor="end">1</text>
+<line x1="64" y1="210.3" x2="542" y2="210.3" class="grid"/>
+<text x="54" y="214.3" class="tick" text-anchor="end">2</text>
+<line x1="64" y1="172.7" x2="542" y2="172.7" class="grid"/>
+<text x="54" y="176.7" class="tick" text-anchor="end">3</text>
+<line x1="64" y1="135.0" x2="542" y2="135.0" class="grid"/>
+<text x="54" y="139.0" class="tick" text-anchor="end">4</text>
+<line x1="64" y1="97.3" x2="542" y2="97.3" class="grid"/>
+<text x="54" y="101.3" class="tick" text-anchor="end">5</text>
+<line x1="64" y1="59.7" x2="542" y2="59.7" class="grid"/>
+<text x="54" y="63.7" class="tick" text-anchor="end">6</text>
+<line x1="64" y1="22.0" x2="542" y2="22.0" class="grid"/>
+<text x="54" y="26.0" class="tick" text-anchor="end">7</text>
+<text x="64.0" y="270" class="tick" text-anchor="middle">63</text>
+<text x="116.5" y="270" class="tick" text-anchor="middle">100</text>
+<text x="258.3" y="270" class="tick" text-anchor="middle">200</text>
+<text x="542.0" y="270" class="tick" text-anchor="middle">400</text>
+<text x="303.0" y="292" class="axlab" text-anchor="middle">Delivered latency (ms)</text>
+<text transform="translate(16,135.0) rotate(-90)" class="axlab" text-anchor="middle">Responsiveness (1 to 7)</text>
+<path d="M64.0 59.7 L116.5 97.3 L258.3 172.7 L542.0 248.0" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="64.0" cy="59.7" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 63 ms: 6.0</title></circle>
+<circle cx="116.5" cy="97.3" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 100 ms: 5.0</title></circle>
+<circle cx="258.3" cy="172.7" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 200 ms: 3.0</title></circle>
+<circle cx="542.0" cy="248.0" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>P01, 400 ms: 1.0</title></circle>
+<text x="554.0" y="252.0" class="dlabel">P01</text>
+<path d="M64.0 40.8 L116.5 97.3 L258.3 22.0 L542.0 59.7" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="64.0" cy="40.8" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 63 ms: 6.5</title></circle>
+<circle cx="116.5" cy="97.3" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 100 ms: 5.0</title></circle>
+<circle cx="258.3" cy="22.0" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 200 ms: 7.0</title></circle>
+<circle cx="542.0" cy="59.7" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>P02, 400 ms: 6.0</title></circle>
+<text x="554.0" y="63.7" class="dlabel">P02</text>
+<path d="M64.0 40.8 L116.5 22.0 L258.3 172.7 L542.0 210.3" fill="none" stroke="var(--s3)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="7 5"/>
+<circle cx="64.0" cy="40.8" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 63 ms: 6.5</title></circle>
+<circle cx="116.5" cy="22.0" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 100 ms: 7.0</title></circle>
+<circle cx="258.3" cy="172.7" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 200 ms: 3.0</title></circle>
+<circle cx="542.0" cy="210.3" r="5" fill="var(--s3)" stroke="var(--surface)" stroke-width="2"><title>P03, 400 ms: 2.0</title></circle>
+<text x="554.0" y="214.3" class="dlabel">P03, pedal</text>
+</svg>
+<div class="legend">
+<span><i class="sw" style="background:var(--s1)"></i>P01</span>
+<span><i class="sw" style="background:var(--s2)"></i>P02</span>
+<span><i class="sw" style="background:var(--s3)"></i>P03, pedal</span>
+</div>
+<figcaption><b>Figure 2. Self-reported responsiveness against delivered latency.</b>
+Higher is more responsive. P01 declines monotonically from 6 to 1, almost the full
+range of the scale. P02 varies without direction and rates 200&nbsp;ms as responsive as
+the floor. P03 holds at 6 to 7 through 100&nbsp;ms and falls to 3 and 2 at 200 and
+400&nbsp;ms.</figcaption>
+</figure>
+
+<p>P01's ratings fall monotonically and traverse almost the entire scale, from 6 at
+the floor to 1 at 400&nbsp;ms. P02's ratings are effectively flat, ranging only
+between 5 and 7, and the 200&nbsp;ms block received the highest rating of their
+session.</p>
+
+<p>P03's ratings divide the conditions into two groups: 6, 7 and 7 for the three
+shortest, and 3 and 2 for 200 and 400&nbsp;ms. Order cannot be excluded here
+either, since P03's two lowest ratings went to the first two blocks they
+experienced. But the pattern matches P01's, whose long delays came third and fourth
+and whose rating recovered to 6 in the final block, and in both participants the
+drop falls between 100 and 200&nbsp;ms.</p>
+
+<div class="tw"><table>
+<caption><b>Table 2.</b> Both measures by delivered latency, with the two
+floor-level blocks pooled within each participant. The floor level is labelled 63;
+for P03, on the pedal, it was 62.</caption>
+<thead><tr><th>Delivered (ms)</th><th>P01 SD (ms)</th><th>P01 rating</th>
+<th>P02 SD (ms)</th><th>P02 rating</th><th>P03 SD (ms)</th><th>P03 rating</th></tr></thead>
+<tbody>
+<tr><td>63</td><td>37.1</td><td>6.0</td><td>67.0</td><td>6.5</td><td>33.0</td><td>6.5</td></tr>
+<tr><td>100</td><td>41.2</td><td>5.0</td><td>108.9</td><td>5.0</td><td>23.0</td><td>7.0</td></tr>
+<tr><td>200</td><td>62.4</td><td>3.0</td><td>80.6</td><td>7.0</td><td>63.8</td><td>3.0</td></tr>
+<tr><td>400</td><td>76.1</td><td>1.0</td><td>93.9</td><td>6.0</td><td>46.9</td><td>2.0</td></tr>
+</tbody></table></div>
+
+<h3>5.4 No threshold is separable</h3>
+
+<p>The analysis fits a two-segment model to each curve, flat up to a breakpoint and
+linear thereafter, searching over the condition values and rejecting any candidate
+whose second segment slopes the wrong way. It reports a breakpoint only when its
+residual error is at least twice as good as the next candidate.</p>
+
+<p>For all three participants, on both measures, no breakpoint meets that bar. The
+best fits and their margins are: P01 precision at 100&nbsp;ms (margin 1.07), P01 rating at 50&nbsp;ms (margin 1.96), P02 precision at 50&nbsp;ms (margin 1.66), P02 rating at 200&nbsp;ms (margin 1.17), P03 precision at 50&nbsp;ms (margin 1.09), P03 rating at 50&nbsp;ms (margin 1.03). A margin near 1 means the next candidate
+fits essentially as well.</p>
+
+<p>This is the correct outcome rather than a disappointing one. With four levels,
+three participants on two different inputs, and an uncalibrated floor, any
+confidently stated threshold would be an artefact of the fitting procedure. RQ1,
+RQ2 and RQ3 are therefore not answered by this data. What the data does support is
+a direction. For P01 both measures move consistently across the range, and at
+400&nbsp;ms the degradation is unambiguous on both. P03's ratings point the same
+way. In both, perceived responsiveness is intact at 100&nbsp;ms and clearly reduced
+at 200&nbsp;ms, which marks the interval between those two values as the one a
+follow-up study should sample most finely.</p>
+
+<h3>5.5 Preference ranking</h3>
+
+<p>After the workload questions each participant ranked the five blocks from most
+to least responsive, choosing from block numbers without ever seeing a latency
+value.</p>
+
+<ul>
+<li><b>P01</b> ranked them 50&#8239;ms, 0&#8239;ms, 100&#8239;ms, 200&#8239;ms, 400&#8239;ms. Given that the two shortest
+conditions are the same stimulus, this ordering is correct.</li>
+<li><b>P02</b> ranked them 0&#8239;ms, 400&#8239;ms, 100&#8239;ms, 50&#8239;ms, 200&#8239;ms, which bears no relation to the
+delivered latencies.</li>
+<li><b>P03</b> ranked them 100&#8239;ms, 50&#8239;ms, 200&#8239;ms, 400&#8239;ms, 0&#8239;ms. The three delays above the floor
+are in the correct order. The two floor-level blocks, which are one stimulus, were
+placed second and last.</li>
+</ul>
+
+<p>P01's ranking is the single cleanest result in the study. It is a five-way
+forced ordering produced from memory at the end of the session, and it recovers
+the experimental manipulation exactly. P02's does not differ from chance. P03's is
+correct wherever the stimuli differed and inconsistent only where they did
+not.</p>
+
+<p>The rankings carry a caveat that the other measures do not. At this point in the
+session the screen read PICK NUMBER 1 above a row of block numbers, with the
+direction of the ranking stated only on the screen before. P03 stopped to ask
+whether the first pick was meant to be the most responsive block or the least. The
+order P03 then gave is consistent with the intended direction, but the question
+shows the prompt could be read either way, and P02, whose ranking looks arbitrary,
+was given the same prompt and did not ask. P02's ranking may therefore reflect the
+wording as much as the participant. The release build names what is being picked on
+every screen of the ranking, in the same words the rating scale uses.</p>
+
+<h3>5.6 Workload</h3>
+
+<figure>
+<svg viewBox="0 0 660 372" role="img" aria-label="NASA-TLX by participant">
+<line x1="150.0" y1="14" x2="150.0" y2="328" class="grid"/>
+<text x="150.0" y="348" class="tick" text-anchor="middle">1</text>
+<line x1="302.0" y1="14" x2="302.0" y2="328" class="grid"/>
+<text x="302.0" y="348" class="tick" text-anchor="middle">3</text>
+<line x1="454.0" y1="14" x2="454.0" y2="328" class="grid"/>
+<text x="454.0" y="348" class="tick" text-anchor="middle">5</text>
+<line x1="606.0" y1="14" x2="606.0" y2="328" class="grid"/>
+<text x="606.0" y="348" class="tick" text-anchor="middle">7</text>
+<text x="138" y="44.2" class="tick" text-anchor="end">Mental demand</text>
+<rect x="150" y="20.8" width="304.0" height="11.5" rx="4" fill="var(--s1)"><title>P01 Mental demand: 5 of 7</title></rect>
+<text x="461.0" y="31.3" class="blab">5</text>
+<rect x="150" y="34.3" width="304.0" height="11.5" rx="4" fill="var(--s2)"><title>P02 Mental demand: 5 of 7</title></rect>
+<text x="461.0" y="44.8" class="blab">5</text>
+<rect x="150" y="47.8" width="304.0" height="11.5" rx="4" fill="var(--s3)"><title>P03 Mental demand: 5 of 7</title></rect>
+<text x="461.0" y="58.3" class="blab">5</text>
+<text x="138" y="96.5" class="tick" text-anchor="end">Physical demand</text>
+<rect x="150" y="73.1" width="152.0" height="11.5" rx="4" fill="var(--s1)"><title>P01 Physical demand: 3 of 7</title></rect>
+<text x="309.0" y="83.7" class="blab">3</text>
+<rect x="150" y="86.7" width="456.0" height="11.5" rx="4" fill="var(--s2)"><title>P02 Physical demand: 7 of 7</title></rect>
+<text x="613.0" y="97.2" class="blab">7</text>
+<rect x="150" y="100.2" width="228.0" height="11.5" rx="4" fill="var(--s3)"><title>P03 Physical demand: 4 of 7</title></rect>
+<text x="385.0" y="110.7" class="blab">4</text>
+<text x="138" y="148.8" class="tick" text-anchor="end">Temporal demand</text>
+<rect x="150" y="125.5" width="380.0" height="11.5" rx="4" fill="var(--s1)"><title>P01 Temporal demand: 6 of 7</title></rect>
+<text x="537.0" y="136.0" class="blab">6</text>
+<rect x="150" y="139.0" width="380.0" height="11.5" rx="4" fill="var(--s2)"><title>P02 Temporal demand: 6 of 7</title></rect>
+<text x="537.0" y="149.5" class="blab">6</text>
+<rect x="150" y="152.5" width="304.0" height="11.5" rx="4" fill="var(--s3)"><title>P03 Temporal demand: 5 of 7</title></rect>
+<text x="461.0" y="163.0" class="blab">5</text>
+<text x="138" y="201.2" class="tick" text-anchor="end">Performance</text>
+<rect x="150" y="177.8" width="76.0" height="11.5" rx="4" fill="var(--s1)"><title>P01 Performance: 2 of 7</title></rect>
+<text x="233.0" y="188.3" class="blab">2</text>
+<rect x="150" y="191.3" width="2.0" height="11.5" rx="4" fill="var(--s2)"><title>P02 Performance: 1 of 7</title></rect>
+<text x="159.0" y="201.8" class="blab">1</text>
+<rect x="150" y="204.8" width="152.0" height="11.5" rx="4" fill="var(--s3)"><title>P03 Performance: 3 of 7</title></rect>
+<text x="309.0" y="215.3" class="blab">3</text>
+<text x="138" y="253.5" class="tick" text-anchor="end">Effort</text>
+<rect x="150" y="230.1" width="228.0" height="11.5" rx="4" fill="var(--s1)"><title>P01 Effort: 4 of 7</title></rect>
+<text x="385.0" y="240.7" class="blab">4</text>
+<rect x="150" y="243.7" width="456.0" height="11.5" rx="4" fill="var(--s2)"><title>P02 Effort: 7 of 7</title></rect>
+<text x="613.0" y="254.2" class="blab">7</text>
+<rect x="150" y="257.2" width="380.0" height="11.5" rx="4" fill="var(--s3)"><title>P03 Effort: 6 of 7</title></rect>
+<text x="537.0" y="267.7" class="blab">6</text>
+<text x="138" y="305.8" class="tick" text-anchor="end">Frustration</text>
+<rect x="150" y="282.5" width="304.0" height="11.5" rx="4" fill="var(--s1)"><title>P01 Frustration: 5 of 7</title></rect>
+<text x="461.0" y="293.0" class="blab">5</text>
+<rect x="150" y="296.0" width="228.0" height="11.5" rx="4" fill="var(--s2)"><title>P02 Frustration: 4 of 7</title></rect>
+<text x="385.0" y="306.5" class="blab">4</text>
+<rect x="150" y="309.5" width="228.0" height="11.5" rx="4" fill="var(--s3)"><title>P03 Frustration: 4 of 7</title></rect>
+<text x="385.0" y="320.0" class="blab">4</text>
+<text x="378.0" y="366" class="axlab" text-anchor="middle">Rating (1 to 7)</text>
+</svg>
+<div class="legend">
+<span><i class="sw" style="background:var(--s1)"></i>P01</span>
+<span><i class="sw" style="background:var(--s2)"></i>P02</span>
+<span><i class="sw" style="background:var(--s3)"></i>P03, pedal</span>
+</div>
+<figcaption><b>Figure 3. NASA-TLX, six unweighted items on a 1 to 7 scale.</b>
+Performance retains the published good-to-poor direction, so a low value means the
+participant felt they performed well. P02 reports the maximum on both physical
+demand and effort while also reporting that they performed well.</figcaption>
+</figure>
+
+<p>The workload profiles differ in a way that is consistent with the performance
+data. P02 reported the scale maximum on physical demand (7) and effort (7) against
+P01's 3 and 4, while simultaneously giving the most favourable available response
+on the performance item. The coherent reading is that P02 was working hard at the
+tapping task itself and had no attention left for the property being manipulated.
+P03's profile lies between the two, with effort at 6 and physical demand at 4. P01
+and P02 rated temporal demand at 6 and P03 at 5, which is expected for a task paced
+by an external metronome.</p>
+
+<h3>5.7 Two properties of the original apparatus, found in its own logs</h3>
+
+<p>Preparing the final release meant asking of the session logs two questions they
+had not been collected to answer. Both answers correct statements made earlier in
+this project.</p>
+
+<p><b>The display rate is chosen by the headset, and it changed.</b> Every logged
+event carries the predicted display time of the frame that processed it. Across the
+two controller sessions the 1,347 intervals between consecutive
+such times are whole multiples of 11.11&nbsp;ms, with a median residual of
+2 microseconds; tested against the
+13.89&nbsp;ms period of a 72&nbsp;Hz display the median residual is
+2.8&nbsp;ms. Those sessions ran at 90&nbsp;Hz, not the
+72&nbsp;Hz stated in earlier milestones. The pedal session, four weeks later on the
+same headset, did run at 72&nbsp;Hz: its intervals are whole multiples of
+13.89&nbsp;ms to within a microsecond. The application requests no rate, so the
+figure given in earlier milestones was an assumption that happened to be false for
+the sessions it described and true for one not yet run. The release build writes
+the observed frame period into each session's header, so that it is read from the
+session and not assumed.</p>
+
+<p><b>The controller's tap timestamp is locked to the frame.</b> If
+<code>lastChangeTime</code> recorded the moment a button went down, the interval
+between it and the display time of the frame that noticed the change would vary
+over at least one frame period, because a press can fall anywhere between two
+samplings of the controller. It does not. Across all 622 logged
+taps that interval lies between 19.4 and
+22.3&nbsp;ms, a range of
+3.0&nbsp;ms where at least 11.1&nbsp;ms was required
+(Figure&nbsp;4). On this runtime the value is the time at which the frame sampled
+the controller. It is not the time of the press.</p>
+
+<figure>
+<svg viewBox="0 0 660 360" role="img" aria-label="Interval between each tap timestamp and the display time of the frame that acted on it">
+<rect x="340.7" y="30" width="158.9" height="120" fill="var(--surface-2)"/>
+<line x1="64" y1="150" x2="636" y2="150" class="grid"/>
+<rect x="336.7" y="146.7" width="5.2" height="3.3" rx="2" fill="var(--ink-2)"><title>19.0 to 19.5 ms: 8 taps</title></rect>
+<rect x="343.9" y="126.3" width="5.1" height="23.7" rx="2" fill="var(--ink-2)"><title>19.5 to 20.0 ms: 58 taps</title></rect>
+<rect x="351.0" y="118.1" width="5.1" height="31.9" rx="2" fill="var(--ink-2)"><title>20.0 to 20.5 ms: 78 taps</title></rect>
+<rect x="358.1" y="124.6" width="5.2" height="25.4" rx="2" fill="var(--ink-2)"><title>20.5 to 21.0 ms: 62 taps</title></rect>
+<rect x="365.3" y="44.0" width="5.1" height="106.0" rx="2" fill="var(--ink-2)"><title>21.0 to 21.5 ms: 259 taps</title></rect>
+<rect x="372.4" y="89.0" width="5.2" height="61.0" rx="2" fill="var(--ink-2)"><title>21.5 to 22.0 ms: 149 taps</title></rect>
+<rect x="379.6" y="146.7" width="5.1" height="3.3" rx="2" fill="var(--ink-2)"><title>22.0 to 22.5 ms: 8 taps</title></rect>
+<text x="64" y="21" class="dlabel">Floor controller, P01 and P02</text>
+<text x="636" y="21" class="blab" text-anchor="end">622 taps, 19.4 to 22.3 ms. Shaded: one frame, 11.1 ms</text>
+<rect x="141.8" y="194" width="198.5" height="120" fill="var(--surface-2)"/>
+<line x1="64" y1="314" x2="636" y2="314" class="grid"/>
+<rect x="136.5" y="306.9" width="5.2" height="7.1" rx="2" fill="var(--ink-2)"><title>5.0 to 5.5 ms: 1 taps</title></rect>
+<rect x="150.8" y="264.5" width="5.1" height="49.5" rx="2" fill="var(--ink-2)"><title>6.0 to 6.5 ms: 7 taps</title></rect>
+<rect x="157.9" y="285.7" width="5.2" height="28.3" rx="2" fill="var(--ink-2)"><title>6.5 to 7.0 ms: 4 taps</title></rect>
+<rect x="165.1" y="264.5" width="5.2" height="49.5" rx="2" fill="var(--ink-2)"><title>7.0 to 7.5 ms: 7 taps</title></rect>
+<rect x="172.2" y="271.6" width="5.2" height="42.4" rx="2" fill="var(--ink-2)"><title>7.5 to 8.0 ms: 6 taps</title></rect>
+<rect x="179.4" y="257.5" width="5.2" height="56.5" rx="2" fill="var(--ink-2)"><title>8.0 to 8.5 ms: 8 taps</title></rect>
+<rect x="186.6" y="236.3" width="5.1" height="77.7" rx="2" fill="var(--ink-2)"><title>8.5 to 9.0 ms: 11 taps</title></rect>
+<rect x="193.7" y="264.5" width="5.2" height="49.5" rx="2" fill="var(--ink-2)"><title>9.0 to 9.5 ms: 7 taps</title></rect>
+<rect x="200.8" y="222.1" width="5.2" height="91.9" rx="2" fill="var(--ink-2)"><title>9.5 to 10.0 ms: 13 taps</title></rect>
+<rect x="208.0" y="243.3" width="5.2" height="70.7" rx="2" fill="var(--ink-2)"><title>10.0 to 10.5 ms: 10 taps</title></rect>
+<rect x="215.2" y="264.5" width="5.2" height="49.5" rx="2" fill="var(--ink-2)"><title>10.5 to 11.0 ms: 7 taps</title></rect>
+<rect x="222.3" y="257.5" width="5.1" height="56.5" rx="2" fill="var(--ink-2)"><title>11.0 to 11.5 ms: 8 taps</title></rect>
+<rect x="229.4" y="222.1" width="5.2" height="91.9" rx="2" fill="var(--ink-2)"><title>11.5 to 12.0 ms: 13 taps</title></rect>
+<rect x="236.6" y="222.1" width="5.2" height="91.9" rx="2" fill="var(--ink-2)"><title>12.0 to 12.5 ms: 13 taps</title></rect>
+<rect x="243.8" y="271.6" width="5.2" height="42.4" rx="2" fill="var(--ink-2)"><title>12.5 to 13.0 ms: 6 taps</title></rect>
+<rect x="250.9" y="208.0" width="5.2" height="106.0" rx="2" fill="var(--ink-2)"><title>13.0 to 13.5 ms: 15 taps</title></rect>
+<rect x="258.1" y="229.2" width="5.1" height="84.8" rx="2" fill="var(--ink-2)"><title>13.5 to 14.0 ms: 12 taps</title></rect>
+<rect x="265.2" y="257.5" width="5.2" height="56.5" rx="2" fill="var(--ink-2)"><title>14.0 to 14.5 ms: 8 taps</title></rect>
+<rect x="272.4" y="236.3" width="5.1" height="77.7" rx="2" fill="var(--ink-2)"><title>14.5 to 15.0 ms: 11 taps</title></rect>
+<rect x="279.5" y="257.5" width="5.1" height="56.5" rx="2" fill="var(--ink-2)"><title>15.0 to 15.5 ms: 8 taps</title></rect>
+<rect x="286.6" y="250.4" width="5.2" height="63.6" rx="2" fill="var(--ink-2)"><title>15.5 to 16.0 ms: 9 taps</title></rect>
+<rect x="293.8" y="222.1" width="5.1" height="91.9" rx="2" fill="var(--ink-2)"><title>16.0 to 16.5 ms: 13 taps</title></rect>
+<rect x="300.9" y="271.6" width="5.2" height="42.4" rx="2" fill="var(--ink-2)"><title>16.5 to 17.0 ms: 6 taps</title></rect>
+<rect x="308.1" y="264.5" width="5.1" height="49.5" rx="2" fill="var(--ink-2)"><title>17.0 to 17.5 ms: 7 taps</title></rect>
+<rect x="315.2" y="243.3" width="5.1" height="70.7" rx="2" fill="var(--ink-2)"><title>17.5 to 18.0 ms: 10 taps</title></rect>
+<rect x="322.4" y="250.4" width="5.2" height="63.6" rx="2" fill="var(--ink-2)"><title>18.0 to 18.5 ms: 9 taps</title></rect>
+<rect x="329.6" y="236.3" width="5.1" height="77.7" rx="2" fill="var(--ink-2)"><title>18.5 to 19.0 ms: 11 taps</title></rect>
+<rect x="336.7" y="250.4" width="5.2" height="63.6" rx="2" fill="var(--ink-2)"><title>19.0 to 19.5 ms: 9 taps</title></rect>
+<rect x="343.9" y="236.3" width="5.1" height="77.7" rx="2" fill="var(--ink-2)"><title>19.5 to 20.0 ms: 11 taps</title></rect>
+<rect x="351.0" y="264.5" width="5.1" height="49.5" rx="2" fill="var(--ink-2)"><title>20.0 to 20.5 ms: 7 taps</title></rect>
+<rect x="358.1" y="299.9" width="5.2" height="14.1" rx="2" fill="var(--ink-2)"><title>20.5 to 21.0 ms: 2 taps</title></rect>
+<rect x="365.3" y="292.8" width="5.1" height="21.2" rx="2" fill="var(--ink-2)"><title>21.0 to 21.5 ms: 3 taps</title></rect>
+<rect x="372.4" y="278.7" width="5.2" height="35.3" rx="2" fill="var(--ink-2)"><title>21.5 to 22.0 ms: 5 taps</title></rect>
+<rect x="379.6" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>22.0 to 22.5 ms: 1 taps</title></rect>
+<rect x="386.8" y="278.7" width="5.1" height="35.3" rx="2" fill="var(--ink-2)"><title>22.5 to 23.0 ms: 5 taps</title></rect>
+<rect x="393.9" y="299.9" width="5.2" height="14.1" rx="2" fill="var(--ink-2)"><title>23.0 to 23.5 ms: 2 taps</title></rect>
+<rect x="401.1" y="285.7" width="5.1" height="28.3" rx="2" fill="var(--ink-2)"><title>23.5 to 24.0 ms: 4 taps</title></rect>
+<rect x="408.2" y="306.9" width="5.2" height="7.1" rx="2" fill="var(--ink-2)"><title>24.0 to 24.5 ms: 1 taps</title></rect>
+<rect x="415.4" y="299.9" width="5.1" height="14.1" rx="2" fill="var(--ink-2)"><title>24.5 to 25.0 ms: 2 taps</title></rect>
+<rect x="422.5" y="292.8" width="5.1" height="21.2" rx="2" fill="var(--ink-2)"><title>25.0 to 25.5 ms: 3 taps</title></rect>
+<rect x="429.6" y="299.9" width="5.2" height="14.1" rx="2" fill="var(--ink-2)"><title>25.5 to 26.0 ms: 2 taps</title></rect>
+<rect x="436.8" y="299.9" width="5.1" height="14.1" rx="2" fill="var(--ink-2)"><title>26.0 to 26.5 ms: 2 taps</title></rect>
+<rect x="451.1" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>27.0 to 27.5 ms: 1 taps</title></rect>
+<rect x="458.2" y="285.7" width="5.1" height="28.3" rx="2" fill="var(--ink-2)"><title>27.5 to 28.0 ms: 4 taps</title></rect>
+<rect x="494.0" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>30.0 to 30.5 ms: 1 taps</title></rect>
+<rect x="501.1" y="306.9" width="5.2" height="7.1" rx="2" fill="var(--ink-2)"><title>30.5 to 31.0 ms: 1 taps</title></rect>
+<rect x="508.3" y="306.9" width="5.2" height="7.1" rx="2" fill="var(--ink-2)"><title>31.0 to 31.5 ms: 1 taps</title></rect>
+<rect x="515.5" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>31.5 to 32.0 ms: 1 taps</title></rect>
+<rect x="522.6" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>32.0 to 32.5 ms: 1 taps</title></rect>
+<rect x="529.8" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>32.5 to 33.0 ms: 1 taps</title></rect>
+<rect x="551.2" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>34.0 to 34.5 ms: 1 taps</title></rect>
+<rect x="558.4" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>34.5 to 35.0 ms: 1 taps</title></rect>
+<rect x="565.5" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>35.0 to 35.5 ms: 1 taps</title></rect>
+<rect x="579.8" y="306.9" width="5.2" height="7.1" rx="2" fill="var(--ink-2)"><title>36.0 to 36.5 ms: 1 taps</title></rect>
+<rect x="629.9" y="306.9" width="5.1" height="7.1" rx="2" fill="var(--ink-2)"><title>39.5 to 40.0 ms: 1 taps</title></rect>
+<text x="64" y="185" class="dlabel">Foot pedal, P03</text>
+<text x="636" y="185" class="blab" text-anchor="end">318 taps, 5.4 to 88.1 ms. Shaded: one frame, 13.9 ms</text>
+<text x="64.0" y="332" class="tick" text-anchor="middle">0</text>
+<text x="135.5" y="332" class="tick" text-anchor="middle">5</text>
+<text x="207.0" y="332" class="tick" text-anchor="middle">10</text>
+<text x="278.5" y="332" class="tick" text-anchor="middle">15</text>
+<text x="350.0" y="332" class="tick" text-anchor="middle">20</text>
+<text x="421.5" y="332" class="tick" text-anchor="middle">25</text>
+<text x="493.0" y="332" class="tick" text-anchor="middle">30</text>
+<text x="564.5" y="332" class="tick" text-anchor="middle">35</text>
+<text x="636.0" y="332" class="tick" text-anchor="middle">40</text>
+<text x="350.0" y="352" class="axlab" text-anchor="middle">Display time of the acting frame minus the logged tap time (ms)</text>
+</svg>
+<figcaption><b>Figure 4. Where the tap timestamp sits relative to the frame that
+acted on it.</b> The shaded band is one frame period, the least a timestamp marking
+the press itself would have to spread across. The controller's timestamps occupy
+3.0&nbsp;ms of it: they follow the frame, not the
+foot. The pedal's timestamps, read at the switch, fill the band and extend past it with the variable delay of the wireless hop, which is the behaviour a press-time stamp must show.</figcaption>
+</figure>
+
+<p>Three consequences follow for the controller data in this section, and none of
+them alters a conclusion drawn from it.</p>
+<ul>
+<li>Each controller tap is recorded late by between zero and one frame, plus the
+controller's radio latency, which is unmeasured. A uniform error over 11.1&nbsp;ms
+has a standard deviation of 3.2&nbsp;ms. Removed in quadrature from the block
+standard deviations of P01 and P02 in Table&nbsp;1, which range from
+33.9 to 108.9&nbsp;ms, it
+changes none of them by more than 0.2&nbsp;ms.</li>
+<li>The same interval measures a constant that could previously only be estimated.
+The clock conversion equates the present moment on the audio clock with the
+predicted display time of the current frame, while the controller's timestamps sit
+a median of 21&nbsp;ms before it. Every time derived
+from the audio clock, each beat and each confirmation, is therefore logged
+21&nbsp;ms late relative to the controller taps.</li>
+<li>For the figures in Table&nbsp;1 that constant has a definite meaning. A
+confirmation logged as delivered at <i>L</i>&nbsp;ms was heard
+<i>L</i>&nbsp;&minus;&nbsp;21&nbsp;ms after the frame
+that sampled the tap, and so about <i>L</i>&nbsp;&minus;&nbsp;15&nbsp;ms plus the
+radio latency after the press itself, taking the mean sampling delay as half a
+frame. The floor logged as 63&nbsp;ms is on the same reckoning about 48&nbsp;ms plus
+radio latency after the press. Mean asynchrony is logged about 15&nbsp;ms more
+negative than it was, less the radio latency.</li>
+</ul>
+
+<p>These are constant shifts. They leave the spacing between conditions, the
+standard deviations and every comparison in Sections&nbsp;5.2 to 5.6 as reported,
+and they move the floor without removing it: the two shortest conditions remain a
+single stimulus. Their importance is for the instrument. Neither property was
+visible in any per-block summary. Both were found by the method of
+Section&nbsp;5.1 applied a second time, asking what the system did instead of what
+it was believed to do, and together they are the reason the final release moves the
+tap onto an input whose time is read at its source.</p>
+
+<h2>6. Discussion</h2>
+
+<h3>6.1 The instrument is the result</h3>
+<p>This study set out to locate a latency threshold for foot input and did not find
+one. What it produced instead is a characterised instrument and a measurement of
+its own floor. That is a smaller claim, but it is a real one, and it is a
+prerequisite for the original question rather than a substitute for it. A threshold
+reported without knowing that the two shortest conditions were identical would have
+been wrong in a way nobody could have detected from the output.</p>
+
+<p>The mechanism by which the floor was found is worth stating plainly, because it
+generalises. The system was asked to report what it actually did rather than what
+it was instructed to do, and the two turned out to differ. Bridges and colleagues
+[1] make the same argument about experiment software generally. Any latency study
+that assumes its requested delays are its delivered delays is making an
+unverified assumption, and in this case that assumption was false for 40% of the
+conditions.</p>
+
+<h3>6.2 Individual differences are larger than expected</h3>
+<p>The participants differ more than the conditions do. P01 produces a textbook
+dose-response on both measures and a perfect preference ranking; P02 produces
+neither; P03 reproduces P01's ratings but not P01's precision curve. With
+n&nbsp;=&nbsp;3 this cannot be decomposed into a trait difference, a
+strategy difference, or a practice difference, but its size is itself informative
+for designing the next round: a study that assumes homogeneous latency sensitivity
+in this task would be poorly powered.</p>
+
+<p>The mean asynchrony figures point the same way. P01 tapped on average
+109.7&nbsp;ms before the beat and P02 52.0&nbsp;ms, a difference of 57.7&nbsp;ms
+between two people on identical hardware. A constant pipeline offset cannot produce
+a between-participant difference, so at least that much of the asynchrony is the
+person rather than the instrument. This materially revises an earlier reading of
+this project's data. At the alpha milestone, with 24 taps per block and a
+malfunctioning rating control, mean asynchrony was approximately 175&nbsp;ms and was
+interpreted as a large unexplained instrument offset. With 60 taps per block and
+the audio path corrected, P02's figure of 52.0&nbsp;ms sits inside the 20 to
+80&nbsp;ms range Repp [5] reports as normal, and P01's 109.7&nbsp;ms exceeds it only
+modestly. The apparatus is in considerably better condition than the earlier
+estimate implied.</p>
+
+<p>P03's mean asynchrony of 110.6&nbsp;ms was measured on the
+pedal, in a time base that does not carry the constants of Section&nbsp;5.7, and it
+is not compared with the two controller figures. It does show that a lead of this
+size is not produced by the controller path alone. Whether it reflects the
+participant, the foot, or the point in the pedal's travel at which the switch
+closes, which is before the foot reaches the end of its stroke, cannot be
+determined from one session.</p>
+
+<h3>6.3 What remains uncalibrated</h3>
+<p>One constant has now been measured and one has not. The clock-conversion
+extension <code>XR_KHR_convert_timespec_time</code> does not load on this headset,
+so the audio clock and the runtime clock are related by an estimate derived from
+predicted display time, recorded in the session files as <code>clock_exact=0</code>.
+At the beta milestone the resulting error was described as probably 15 to
+30&nbsp;ms. Section&nbsp;5.7 puts it at 21&nbsp;ms
+relative to the controller's timestamps, from the logs themselves.</p>
+
+<p>What remains unmeasured is the physical path at both ends: the radio latency
+between a press on the controller and the frame that samples it, and the interval
+between the presentation time the audio stream reports and sound reaching the ear.
+No software on the headset can observe either. Both affect absolute figures and
+neither affects comparisons between conditions, since a constant offset shifts
+every condition equally and the primary measure is a standard deviation. The claims
+in Sections&nbsp;5.2 and 5.3 are therefore not threatened by these gaps, but any
+attempt to compare absolute asynchrony to published values is.</p>
+
+<h3>6.4 The final release: a pedal timed at its source</h3>
+<p>The apparatus delivered with this report differs in its input from the one that
+collected the first two sessions. A first pedal prototype, built after data collection,
+relayed each press over the network and let the headset stamp it on arrival. That
+design was not admitted to the timing path, because it would have placed the Pi's
+input handling, the network stack and a wireless hop inside the measured interval.
+The release version is the design of Section&nbsp;3.4, in which the time is read at
+the switch and the network carries it without being able to alter it.</p>
+
+<p>Because the purpose of the change is a claim about timing, it was tested as one.
+The relay and the headset's receiver were run unmodified on a single machine with a
+simulated wireless link between them and the relay's clock set wrong by sixteen
+minutes. Since both programs then share one physical clock, the true time of every
+simulated press is known exactly, and the error of the time the receiver recovers
+can be read off directly (Table&nbsp;3).</p>
+
+<div class="tw"><table>
+<caption><b>Table 3.</b> Bench test of the pedal link. Error is the press time
+recovered by the headset's receiver minus the true press time. The last column is
+how late each press arrived, which is the error an arrival-stamped design would
+have had.</caption>
+<thead><tr><th>Simulated link</th><th>Presses delivered</th><th>Rebuilt after loss</th>
+<th>Median error (ms)</th><th>Worst error (ms)</th><th>Arrival delay (ms)</th></tr></thead>
+<tbody>
+<tr><td>Quiet network: 1.5 ms each way, no loss</td><td>30 of 30</td><td>0</td><td>0.01</td><td>0.10</td><td>5 to 7</td></tr>
+<tr><td>Bad network: 3 ms up, 5 ms down, jitter, 10% stalls of 20 to 60 ms, 15% loss</td><td>40 of 40</td><td>2</td><td>0.92</td><td>2.08</td><td>7 to 48</td></tr>
+<tr><td>Every press packet destroyed in transit</td><td>20 of 20</td><td>20</td><td>0.04</td><td>0.10</td><td>12 to 36</td></tr>
+</tbody></table></div>
+
+<p>On a quiet link the recovered press time was within
+0.1&nbsp;ms of the truth for every press. On a link
+with 79 dropped packets, random delay and stalls
+of up to 60&nbsp;ms, every press was still delivered and the worst error was
+2.1&nbsp;ms, against arrival delays of up to
+48&nbsp;ms; the median error of
+0.9&nbsp;ms is half the 2&nbsp;ms asymmetry built
+into that link, which is the error a symmetric-path assumption predicts. With every
+press packet destroyed in transit, all 20 presses were
+reconstructed from later packets with the correct time. The same harness confirms
+that a restart of the relay, a headset started after the pedal has been in use, an
+electrical spike, contact bounce and a dropped kernel edge each behave as intended.
+A further test replays a whole simulated session through the experiment logic of
+both builds with the controller as input: the release build logs events identical,
+row for row, to the build that collected P01 and P02, so the change of input has
+not disturbed the path that data came from. The tests are in the
+repository.</p>
+
+<p>On the hardware itself, the headset located the relay without configuration in
+under a second and held a round trip of
+2.6&nbsp;ms on a home network, with
+190 of 191 probes answered in ten
+seconds. That bounds the clock error at about
+1.3&nbsp;ms. The third session in Section&nbsp;5 was collected this way, and its header describes the link over a whole session: 318 tap events, none without a source timestamp, none lost and none reconstructed; a median of 15&nbsp;ms between a press and the frame that acted on it, with one press delayed to 88&nbsp;ms by a stalled packet; and a median round trip of 2.6&nbsp;ms behind the clock offset.</p>
+
+<p>The limits of this should be stated as plainly as its results. One participant
+has been run on the pedal and two on the controller; Section&nbsp;5 marks which is
+which, and absolute asynchrony is not compared across the two. The pedal does not
+lower the audio floor, and the 3&nbsp;ms spent
+confirming a press, together with the wireless hop, delays how soon a confirmation
+can follow one, so the two shortest conditions remain merged. A metal foot switch
+also makes a mechanical click of its own at the moment of contact, an undelayed
+sound that a silent controller button does not make. P03 heard it on every tap,
+and a study run on the pedal would need to mask it or account for it.</p>
+
+<h2>7. Limitations</h2>
+<ul>
+<li><b>The floor.</b> The pipeline cannot deliver a response faster than
+approximately 63&nbsp;ms, so two of five conditions are one condition and the
+region of greatest theoretical interest is unreachable.</li>
+<li><b>Sample size.</b> Three participants, who do not agree. Nothing here
+approaches statistical significance and none of the three research questions is
+answered.</li>
+<li><b>Two inputs.</b> P01 and P02 used the floor controller and P03 the foot
+pedal. Precision and ratings are compared across them; absolute asynchrony is not,
+for the reasons in Section&nbsp;5.7.</li>
+<li><b>Counterbalancing and practice.</b> The rotating order balances serial
+position but not first-order carryover. P02 and P03 both produced their least
+precise block first, and P03's precision improved with every block, so a practice
+effect cannot be separated from a condition effect. The practice phase is too
+short.</li>
+<li><b>Display rate.</b> The headset ran two sessions at 90&nbsp;Hz and one at
+72&nbsp;Hz. The release build records the rate but does not yet fix it.</li>
+<li><b>Ranking prompt.</b> All three rankings were collected with a prompt that one
+participant could not interpret without asking (Section&nbsp;5.5). It has been
+reworded for the release, but the rankings reported here predate the change, and
+P02's in particular should not be read as evidence of insensitivity.</li>
+<li><b>Tap timestamps in the reported data.</b> The controller's tap time is
+quantised to the 11.1&nbsp;ms frame and carries an unmeasured radio latency
+(Section&nbsp;5.7). The effect on the reported standard deviations is below
+0.2&nbsp;ms; the effect on absolute asynchrony is a constant.</li>
+<li><b>Uncalibrated absolute timing.</b> As Section 6.3 sets out, absolute
+asynchrony cannot be compared to published figures.</li>
+<li><b>The pedal's own click.</b> A metal foot switch clicks at the moment of
+contact. That is an undelayed sound the design does not yet mask, and it may have
+influenced P03's ratings.</li>
+<li><b>Reduced workload instrument.</b> The TLX variant used is not a standard
+score.</li>
+<li><b>Audio routing.</b> Sessions must run on the headset's own speakers; a
+Bluetooth audio device would add 100&nbsp;ms or more, exceeding three of the four
+resolvable levels, and would do so silently.</li>
+<li><b>Metronome regularity.</b> The visual pulse lands on the next available
+frame, so the beat a participant sees is irregular by up to 11&nbsp;ms. The logged
+beat time remains exact, so the measurement is unaffected, but the stimulus is
+imperfect.</li>
+</ul>
+
+<h2>8. Conclusion and future work</h2>
+
+<p>This project built a working instrument for measuring latency tolerance in
+foot-based virtual reality interaction, ran three full sessions through it, and
+established that the instrument has a response floor of approximately 63&nbsp;ms
+that was invisible until the system was made to report its own behaviour, and that
+a second input path then reproduced at 62&nbsp;ms. Within the four levels the
+apparatus can resolve, one participant degraded monotonically on both timing
+precision and perceived responsiveness and recovered the experimental ordering
+exactly from memory; a second showed no sensitivity to the manipulation at all; and
+a third, run on the pedal, matched the first on perceived responsiveness, both
+placing the loss between 100 and 200&nbsp;ms. No threshold can be stated. The same habit of reading the
+logs for what the system did then showed that the display rate had been misstated
+and that the tap timestamp followed the frame rather than the foot, and the final
+release answers the second finding with a pedal whose press time is read at the
+switch and verified to about 2&nbsp;ms.</p>
+
+<p>The next steps follow directly from the limitations, in order of what they
+unblock:</p>
+<ol>
+<li><b>Measure the floor externally.</b> High-speed video at 240&nbsp;frames per
+second gives roughly 4&nbsp;ms of resolution, enough to bracket the interval from
+pedal contact to audible confirmation and to determine how much of the 63&nbsp;ms
+is the audio buffer and how much lies elsewhere. Until this number exists, every
+other refinement rests on an assumption.</li>
+<li><b>Respace the conditions above the measured floor.</b> Two of five blocks
+currently deliver the same stimulus. Replacing them with levels the apparatus can
+distinguish is a one-line change and immediately increases the resolution of the
+design by 25%.</li>
+<li><b>Repeat the study on the pedal, with more participants.</b> The distance
+between participants is the strongest argument the data makes, and it is an
+argument for a larger sample. Collected on the pedal, that sample would also be free of the
+frame quantisation and the conversion constant identified in Section&nbsp;5.7.</li>
+<li><b>Adopt a Williams design and lengthen practice</b>, so that first-order
+carryover is balanced rather than only serial position, and so that the first
+scored block is no longer the one in which participants are still learning the
+task.</li>
+<li><b>Request a fixed display rate</b>, so that sessions are comparable by
+construction and not by inspection of their logs.</li>
+<li><b>Deal with the pedal's own click.</b> Either mask it, for instance by
+presenting the audio over wired earphones, or measure its level at the ear and
+report it as part of the stimulus.</li>
+</ol>
+
+<p>The methodological point generalises beyond this study. An interactive system
+that reports the latency it requested, rather than the latency it delivered, cannot
+be used to measure latency. Making that difference visible cost one change to a
+scheduler and produced the firmest number in this report, and asking the same
+question of the tap timestamps produced the next.</p>
+
+<h2>References</h2>
+<ol class="refs">
+<li>Bridges, D., Pitiot, A., MacAskill, M. R., &amp; Peirce, J. W. (2020). The
+timing mega-study: comparing a range of experiment generators, both lab-based and
+online. <i>PeerJ</i>, 8, e9414.
+<a href="https://doi.org/10.7717/peerj.9414">https://doi.org/10.7717/peerj.9414</a></li>
+<li>Friston, S., Karlstr&ouml;m, P., &amp; Steed, A. (2016). The Effects of Low
+Latency on Pointing and Steering Tasks. <i>IEEE Transactions on Visualization and
+Computer Graphics</i>, 22(5), 1605&ndash;1615.
+<a href="https://doi.org/10.1109/TVCG.2015.2446467">https://doi.org/10.1109/TVCG.2015.2446467</a></li>
+<li>Hart, S. G., &amp; Staveland, L. E. (1988). Development of NASA-TLX (Task Load
+Index): Results of empirical and theoretical research. <i>Advances in
+Psychology</i>, 52, 139&ndash;183.
+<a href="https://doi.org/10.1016/S0166-4115(08)62386-9">https://doi.org/10.1016/S0166-4115(08)62386-9</a></li>
+<li>MacKenzie, I. S., &amp; Ware, C. (1993). Lag as a Determinant of Human
+Performance in Interactive Systems. <i>Proceedings of INTERACT '93 and CHI '93</i>,
+488&ndash;493.
+<a href="https://doi.org/10.1145/169059.169431">https://doi.org/10.1145/169059.169431</a></li>
+<li>Repp, B. H. (2005). Sensorimotor synchronization: A review of the tapping
+literature. <i>Psychonomic Bulletin &amp; Review</i>, 12(6), 969&ndash;992.
+<a href="https://doi.org/10.3758/BF03206433">https://doi.org/10.3758/BF03206433</a></li>
+<li>Waltemate, T., Senna, I., H&uuml;lsmann, F., Rohde, M., Kopp, S., Ernst, M.,
+&amp; Botsch, M. (2016). The Impact of Latency on Perceptual Judgments and Motor
+Performance in Closed-Loop Interaction in Virtual Reality. <i>Proceedings of VRST
+'16</i>, 27&ndash;35.
+<a href="https://doi.org/10.1145/2993369.2993381">https://doi.org/10.1145/2993369.2993381</a></li>
+</ol>
+
+<h2>Appendix: reproducing these results</h2>
+<p>All three session files are in the repository under <code>data/</code>. Open the
+analysis tool linked at the top of this report, select the files, and every figure
+and table above is reproduced, including the threshold fits and their margins. The
+tool also runs the full experiment from the keyboard as a desktop pilot, which is
+how the measures and chart code were verified before the headset implementation
+existed.</p>
+
+<p>The pedal's relay is in <code>pi/</code> with a script that installs it as a
+service started at power-up. The bench tests behind Table&nbsp;3 are in
+<code>tests/</code> and need only Python, its <code>gpiozero</code> package and a
+C++ compiler: one drives the relay's
+debounce logic through a simulated pin, one runs the relay and the headset's
+receiver against each other across a simulated network, and one replays a whole
+session through the experiment logic on a desktop.</p>
+
+<p class="note">Session metadata: all three files record
+<code>audio_timed=1</code> and <code>clock_exact=0</code>. 887 scored taps
+across fifteen blocks (940 tap events in
+all, the difference being taps that found no beat). Beat interval 600&nbsp;ms
+throughout. The P03 file additionally records <code>tap_source=pedal</code>,
+<code>pedal_taps=318</code>,
+<code>pedal_untimed=0</code>,
+<code>pedal_lost=0</code>,
+<code>pedal_age_ms=14.7</code>,
+<code>pedal_rtt_ms=2.6</code> and
+<code>frame_ms=13.88</code>. The released executable differs
+from the build that recorded P03 only in the wording of the two ranking
+screens.</p>
+
+</div>
+</body>
+</html>

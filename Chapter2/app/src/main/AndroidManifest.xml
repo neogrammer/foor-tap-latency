@@ -26,6 +26,8 @@
         android:required="false" />
 
     <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
+    <!-- UDP socket for the foot pedals (PedalReceiver). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"

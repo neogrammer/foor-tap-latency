@@ -23,6 +23,7 @@ XrVector3f operator*(XrVector3f a, float b) {
 #include "TextRenderer.h"
 #include "HandPointer.h"
 #include "TapExperiment.h"
+#include "network/PedalReceiver.h"
 #include <dirent.h>
 
 class VulkanXRay {
@@ -64,9 +65,17 @@ public:
         if (!androidApp || !androidApp->activity->externalDataPath) return;
         std::string out = std::string(androidApp->activity->externalDataPath)
                           + "/taps_" + m_participantId + ".csv";
-        if (m_exp.WriteCSV(out)) {
+        // The header also records how the pedal link behaved and the display's
+        // frame period as actually observed, so neither has to be assumed later.
+        const PedalLink link = m_pedals.link();
+        char extra[160];
+        snprintf(extra, sizeof(extra), "pedal_recovered=%llu pedal_lost=%llu frame_ms=%.2f",
+                 (unsigned long long)link.recovered, (unsigned long long)link.lost,
+                 (double)m_minFrameNs / 1e6);
+        if (m_exp.WriteCSV(out, extra)) {
             m_wroteCSV = true;
-            XR_TUT_LOG("Wrote " << m_exp.EventCount() << " events to " << out);
+            XR_TUT_LOG("Wrote " << m_exp.EventCount() << " events to " << out
+                       << " (" << m_exp.SourceSummary() << " " << extra << ")");
         } else {
             XR_TUT_LOG_ERROR("Failed to write tap CSV to " << out);
         }
@@ -115,6 +124,14 @@ public:
                              "which is quantised to the display frame.");
         }
 
+        // Foot pedal from the Pi. Starts even when nothing is sending yet; the
+        // setup screen reads PEDAL OFFLINE until the relay answers.
+        if (m_pedals.start(kPedalPort)) {
+            XR_TUT_LOG("Pedal receiver listening on UDP " << kPedalPort);
+        } else {
+            XR_TUT_LOG_ERROR("Pedal receiver failed to start. Is INTERNET in the manifest?");
+        }
+
         // Default to the next unused number, so the common case is to walk in,
         // confirm, and start. The first screen can still step it if a session
         // has to be redone.
@@ -144,6 +161,7 @@ public:
 //            }
         //}
         WriteSessionCSV();
+        m_pedals.stop();
         m_audio.Destroy();
         m_hands.Destroy();
         m_input.Destroy();
@@ -542,6 +560,48 @@ private:
        //     OPENXR_CHECK(xrDestroySpace(m_viewSpace), "Failed to destroy VIEW Space.")
        // }
     }
+    // ---- Foot pedal -------------------------------------------------------
+    // The pedal is the tap. Every press arrives from the Pi already carrying
+    // the time the foot went down (network/PedalReceiver.h). That time is on
+    // CLOCK_MONOTONIC, so it goes through the same clock conversion as the
+    // metronome beat before the experiment sees it.
+    //
+    // Nothing on screen or in the speakers reacts here during a block. The only
+    // answer to a tap is the experiment's own click and flash, at the delay
+    // under test. An instant lamp or thump beside it would hand the participant
+    // exactly the zero-latency feedback the study is withholding. The setup
+    // screen is the one exception: there the pedal thumps and lights a lamp, so
+    // whoever is running the session can see it is being heard.
+    void PollPedals(XrTime frameTime) {
+        m_pedalFlash *= 0.80f;
+        const bool setup = m_exp.AtDiagnostic();
+        for (const PedalEvent &ev : m_pedals.drain()) {
+            if (!ev.isDown()) continue;
+
+            XrTime t = 0;
+            const bool converted = m_clock.MonotonicToXr(ev.monoNs, &t);
+            // A press the Pi itself was unsure of counts as a tap but not as a
+            // timed one.
+            const bool timed = converted && ev.timed && !ev.late;
+            m_exp.PushPedalTap(converted ? t : frameTime, timed, (float)ev.rttNs / 1e6f);
+            m_pedalCount++;
+
+            if (setup) {
+                m_pedalFlash = 1.0f;
+                // Frame 0 means "as soon as the stream can"; ScheduleClick clamps forward.
+                m_audio.ScheduleClick(0, AudioEngine::kVoiceKick);
+                struct timespec ts{};
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                const int64_t nowMono = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+                XR_TUT_LOG("Pedal press " << ev.seq << (timed ? " timed" : " UNTIMED")
+                           << (ev.recovered ? " (rebuilt after a lost packet)" : "")
+                           << ": reached the app " << (double)(nowMono - ev.monoNs) / 1e6
+                           << " ms after the foot went down, clock good to "
+                           << (double)ev.rttNs / 2e6 << " ms");
+            }
+        }
+    }
+
     void RenderFrame()
     {
         // Get the XrFrameState for timing and rendering info.
@@ -558,6 +618,7 @@ private:
         if (m_sessionRunning) {
             m_clock.Calibrate(frameState.predictedDisplayTime);
             m_input.Sync(frameState.predictedDisplayTime);
+            PollPedals(frameState.predictedDisplayTime);
             if (m_hands.Available()) {
                 m_hands.Update(m_localSpace, frameState.predictedDisplayTime);
             }
@@ -568,6 +629,13 @@ private:
             const float dt = (m_lastFrameTime > 0)
                 ? (float)((frameState.predictedDisplayTime - m_lastFrameTime) / 1000000LL) / 1000.0f
                 : 0.0f;
+            // The shortest gap ever seen between two frames is the display's
+            // frame period. Written to the CSV header so the refresh rate a
+            // session ran at is read from the session, not assumed.
+            if (m_lastFrameTime > 0) {
+                const int64_t gap = frameState.predictedDisplayTime - m_lastFrameTime;
+                if (gap > 0 && (m_minFrameNs == 0 || gap < m_minFrameNs)) m_minFrameNs = gap;
+            }
             m_lastFrameTime = frameState.predictedDisplayTime;
 
             m_pointer.Update(m_hands, kTextZ);
@@ -776,6 +844,29 @@ private:
                           0.55f + 0.35f * rs.beatPulse, 0.95f});
         }
 
+        // Foot pedal status, on the setup screen only. One lamp, lit while the
+        // pedal is held and flashing on each press, and a line underneath saying
+        // whether the Pi is there and whether its clock has been matched. It is
+        // absent from every other screen on purpose: see PollPedals.
+        if (rs.phase == Phase::Diagnostic) {
+            const PedalLink link = m_pedals.link();
+            XrVector3f lamp = {0.25f, 0.25f, 0.28f};                  // no relay: grey
+            if (link.online) {
+                lamp = link.pedalDown ? XrVector3f{0.95f, 0.50f, 0.15f}
+                                      : XrVector3f{0.30f, 0.20f, 0.15f};
+                if (m_pedalFlash > 0.02f)
+                    lamp = {0.30f + 0.65f * m_pedalFlash, 0.20f + 0.30f * m_pedalFlash, 0.15f};
+            }
+            const float ks = 0.12f + 0.08f * m_pedalFlash;
+            RenderCuboid({noRot, {0.45f, floorY + 1.05f, -1.15f}}, {ks, ks, ks}, lamp);
+            if (!link.online)      snprintf(buf, sizeof(buf), "PEDAL OFFLINE");
+            else if (!link.synced) snprintf(buf, sizeof(buf), "PEDAL FOUND  SYNCING");
+            else                   snprintf(buf, sizeof(buf), "PEDAL READY  %llu TAPS",
+                                            (unsigned long long)m_pedalCount);
+            Say(buf, floorY + 0.88f, 0.040f,
+                link.synced ? Green() : (link.online ? Read() : Dim()));
+        }
+
         // Dialog panel
         RenderCuboid({noRot, {0.0f, panelCY, kPanelZ}},
                      {PanelUI::kPanelW, PanelUI::kPanelH, 0.03f},
@@ -926,13 +1017,22 @@ private:
 
         // ---- Preference ranking -----------------------------------------
         case Phase::RankIntro:
-            Say("RANK THE BLOCKS", L1, 0.046f, Read());
-            Say("MOST RESPONSIVE FIRST", L3, 0.030f, Read());
+            Say("RANK THE FIVE BLOCKS", L1, 0.046f, Read());
+            Say("MOST INSTANT FIRST  LAGGIEST LAST", L3, 0.028f, Read());
             break;
 
         case Phase::Rank: {
-            snprintf(buf, sizeof(buf), "PICK NUMBER %d", rs.rankPosition);
-            Say(buf, L1, 0.044f, Read());
+            // This screen used to say PICK NUMBER 1 above a row of block numbers.
+            // A participant could not tell whether "number 1" was a block or a
+            // place in the ranking, or which end the ranking started from, and
+            // had to ask. It now says what is being picked every time, in the
+            // same INSTANT and LAGGY words the rating scale has used all session,
+            // and how far through the picking they are.
+            Say(rs.rankPosition <= 1 ? "MOST INSTANT BLOCK" : "NEXT MOST INSTANT BLOCK",
+                L1, 0.040f, Read());
+            snprintf(buf, sizeof(buf), "PICK %d OF %d", rs.rankPosition,
+                     TapExperiment::kConditionCount - 1);
+            Say(buf, L0, 0.024f, Dim());
 
             const int hover = PanelUI::DigitOfTarget(ptr.target);
             bool hoverLive = false;
@@ -1399,6 +1499,11 @@ private:
     AudioEngine   m_audio;
     XrClock       m_clock;
     TapExperiment m_exp;
+    static constexpr int kPedalPort = 9999;      // pedal_relay.py --port
+    PedalReceiver m_pedals;
+    float         m_pedalFlash = 0.0f;           // setup screen only
+    uint64_t      m_pedalCount = 0;              // presses since the app started
+    int64_t       m_minFrameNs = 0;              // shortest frame gap seen: the display period
     std::string   m_participantId  = "P01";
     int           m_participantNum = 1;          // drives the Latin square
     bool          m_wroteCSV = false;

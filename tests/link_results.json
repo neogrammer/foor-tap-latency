@@ -1,0 +1,50 @@
+{
+ "quiet": {
+  "label": "Quiet network: 1.5 ms each way, no loss",
+  "sent": 30,
+  "arrived": 30,
+  "timed": 30,
+  "rebuilt": 0,
+  "lost": 0,
+  "dropped_by_network": 0,
+  "err_median_ms": -0.014,
+  "err_worst_ms": 0.095,
+  "err_p95_ms": 0.07,
+  "claimed_bound_ms": 1.917,
+  "arrival_late_median_ms": 5.42,
+  "arrival_late_min_ms": 5.0,
+  "arrival_late_max_ms": 7.02
+ },
+ "bad": {
+  "label": "Bad network: 3 ms up, 5 ms down, jitter, 10% stalls of 20 to 60 ms, 15% loss",
+  "sent": 40,
+  "arrived": 40,
+  "timed": 40,
+  "rebuilt": 2,
+  "lost": 0,
+  "dropped_by_network": 79,
+  "err_median_ms": 0.923,
+  "err_worst_ms": 2.077,
+  "err_p95_ms": 1.074,
+  "claimed_bound_ms": 5.566,
+  "arrival_late_median_ms": 10.46,
+  "arrival_late_min_ms": 7.48,
+  "arrival_late_max_ms": 48.44
+ },
+ "nopress": {
+  "label": "Every press packet destroyed in transit",
+  "sent": 20,
+  "arrived": 20,
+  "timed": 20,
+  "rebuilt": 20,
+  "lost": 0,
+  "dropped_by_network": 40,
+  "err_median_ms": -0.037,
+  "err_worst_ms": 0.096,
+  "err_p95_ms": 0.095,
+  "claimed_bound_ms": 1.856,
+  "arrival_late_median_ms": 21.31,
+  "arrival_late_min_ms": 11.66,
+  "arrival_late_max_ms": 35.52
+ }
+}

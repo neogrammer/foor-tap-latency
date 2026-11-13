@@ -35,7 +35,7 @@ public:
         int32_t  block;       // -1 during practice
         int32_t  latencyMs;   // condition for this block
         int32_t  index;       // beat number within block, or rating value
-        XrTime   sourceTime;  // for a Tap: the action's lastChangeTime if it differed
+        XrTime   sourceTime;  // the display time of the frame that acted on this event
     };
 
     // ~20 minutes of session at a generous event rate.
@@ -51,7 +51,8 @@ public:
 
     bool WriteCSV(const std::string &path, const std::string &participant,
                   int32_t beatIntervalMs,
-                  bool audioTimed = false, bool clockExact = false) const {
+                  bool audioTimed = false, bool clockExact = false,
+                  const std::string &extraHeader = "") const {
         if (m_events.empty()) return false;
         FILE *f = fopen(path.c_str(), "w");
         if (!f) return false;
@@ -59,10 +60,13 @@ public:
         // Header carries the session constants so one file is self-describing.
         // audio_timed says whether beats were pinned to samples or to display
         // frames, which is the difference between a precise measurement and a
-        // 14 ms-quantised one. Never analyse a file without reading this line.
-        fprintf(f, "# participant=%s beat_interval_ms=%d audio_timed=%d clock_exact=%d\n",
+        // frame-quantised one. Never analyse a file without reading this line.
+        // extraHeader carries more key=value pairs in the same style: where the
+        // taps came from (pedal or controller) and how good the pedal link was.
+        fprintf(f, "# participant=%s beat_interval_ms=%d audio_timed=%d clock_exact=%d%s%s\n",
                 participant.c_str(), beatIntervalMs,
-                audioTimed ? 1 : 0, clockExact ? 1 : 0);
+                audioTimed ? 1 : 0, clockExact ? 1 : 0,
+                extraHeader.empty() ? "" : " ", extraHeader.c_str());
         fprintf(f, "event,xr_time_ns,block,latency_ms,index,source_time_ns\n");
         for (const Event &e : m_events) {
             const char *k = "unknown";
