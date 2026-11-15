@@ -355,7 +355,7 @@ bash run_tests.sh
   direction, good to poor, so it is reverse scored against the other five.
 - Sessions must run on the headset's own speakers.
 
-The full discussion is in the report.
+The full discussion is in the report.  Claude Code was used to help with implementation details for my design and research.
 
 ---
 
